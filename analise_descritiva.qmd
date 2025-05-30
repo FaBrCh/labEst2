@@ -1,0 +1,966 @@
+---
+title: "Rodada 2 - LabEst"
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    code-fold: true
+    code-tools: true
+    fig-width: 8
+    fig-height: 6
+editor: visual
+execute:
+  echo: true
+  message: false
+  warning: false
+---
+
+```{r setup}
+#| include: false
+library(tidyverse)
+library(janitor)
+library(skimr)
+library(DT)
+library(gt)
+library(gtsummary)
+library(kableExtra)
+library(reshape2)
+```
+
+# Importação e preparação dos dados
+
+```{r}
+data <- readxl::read_xls("data/BAYLEY TRIAGEM AUDITIVA ANÁLISE ESTATÍSTICA 16052025.xls") %>% 
+  janitor::clean_names()
+
+derivadas_classificacao <- c(
+  "pontosabep36", "somaludicas36",
+  "cogbal36", "cogcomp36", "lrbal36", "lebal36",
+  "lingcomp36", "mfbal36", "mgbal36", "motorcomp36")
+
+data <- data %>% 
+  dplyr::select(-any_of(derivadas_classificacao)) %>%
+  dplyr::mutate(across(everything(), ~ifelse(. == 'Missing', NA, .)))
+```
+
+# Dicionário das variáveis
+
+```{r}
+dict <- tribble(
+  ~Variavel, ~Explicacao, ~Categorias,
+  "idademaecat", "Idade da mãe (Adulta: 1, Adolescente: 0)", "1: adulta, 0: adolescente",
+  "pesocat", "Peso ao nascimento (> ou igual 2500g: 1; <2500g: 0)", "1: >=2500g, 0: <2500g",
+  "igcat", "Idade gestacional ao nascimento (> ou igual 37s: 1; <37s: 0)", "1: >=37s, 0: <37s",
+  "partocat", "Via de parto (vaginal/fórceps: 1, cesariana: 0)", "1: vaginal/fórceps, 0: cesariana",
+  "lme6", "Aleitamento materno exclusivo aos 6 meses", "1: sim, 0: não",
+  "corcat24", "Etnia (branco: 1, não branco: 0)", "1: branco, 0: não branco",
+  "estadocivilmae24", "Estado civil mãe (casada/união estável: 1, solteira/divorciada: 0)", "1: casada/união, 0: solteira/div.",
+  "escolamaecat36", "Escolaridade mãe (2: superior/pos, 1: médio, 3: fundamental)", "2: superior/pós, 1: médio, 3: fundamental",
+  "abepcat36", "Classe social (A, B, C, DE)", "A, B, C, DE",
+  "tanu", "Triagem Auditiva Neonatal Universal", "Sim/Não",
+  "resultadotanu", "Resultado TANU", "Sim/Não",
+  "resultqtai36", "Resultado QTAI", "Positiva/Negativa",
+  "creche36", "Frequenta creche?", "Sim/Não",
+  "ludicascat36", "Atividades lúdicas (adequada: 4+, inadequada: 1-3)", "adequada/inadequada",
+  "tempotelacat36", "Tempo tela <1h/dia (1: usa 1h+, 0: menos de 1h)", "1: >=1h, 0: <1h",
+  "horacertacat36", "Horário fixo para telas (1: sim, 0: não)", "1: sim, 0: não",
+  "telacasa36", "Como usa telas em casa", "Adultos/Outra criança/Sozinho",
+  "telalimitetempocat36", "Limite de tempo pelos cuidadores", "1: sim, 0: não",
+  "telainteraçãocat36", "Interagem na tela?", "1: sim, 0: não",
+  "telalimiteconteudocat36", "Limitam o conteúdo?", "1: sim, 0: não",
+  "pedsqlfisico36", "Escala PEDSQL Físico (contínua)", "0-100",
+  "pedsqlpsico36", "Escala PEDSQL Psicológico (contínua)", "0-100",
+  "pedsqlglobal36", "Escala PEDSQL Global (contínua)", "0-100",
+  "genero", "Gênero da criança", "Feminino/Masculino",
+  "classcogbal36", "Desenvolvimento Cognitivo", "1: normal, 0: atraso",
+  "classcogcomp36", "Desenvolvimento Cognitivo Composto", "1: normal, 0: atraso",
+  "claslrbal36", "Domínio Linguagem Receptiva", "1: normal, 0: atraso",
+  "classlebal36", "Domínio Linguagem Expressiva", "1: normal, 0: atraso",
+  "classlingcomp36", "Domínio Linguagem Composto", "1: normal, 0: atraso",
+  "classmfbal36", "Domínio Motricidade Fina", "1: normal, 0: atraso",
+  "classmgbal36", "Domínio Motricidade Grossa", "1: normal, 0: atraso",
+  "classmotorcomp36", "Domínio Motricidade Composta", "1: normal, 0: atraso"
+)
+knitr::kable(dict, caption = "Dicionário resumido das variáveis") %>% kableExtra::kable_styling()
+```
+
+# Análise Univariada
+
+## Variaveis Categóricas
+
+```{r}
+#| tbl-cap: "Análise descritiva das variáveis categóricas com PEDSQL Global"
+
+# Função para criar sumário estatístico
+criar_sumario <- function(var_name, var_label) {
+  # Calcular total da variável (excluindo NAs)
+  total_var <- data %>%
+    filter(!is.na(.data[[var_name]])) %>%
+    nrow()
+  
+  # Dados para análise
+  dados_analise <- data %>%
+    filter(!is.na(.data[[var_name]]) & !is.na(pedsqlglobal36))
+  
+  # Calcular estatísticas descritivas
+  resumo <- dados_analise %>%
+    group_by(categoria = .data[[var_name]]) %>%
+    summarise(
+      n = n(),
+      media = round(mean(pedsqlglobal36, na.rm = TRUE), 2),
+      dp = round(sd(pedsqlglobal36, na.rm = TRUE), 2),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      variavel = var_label,
+      categoria = as.character(categoria),
+      percentual = round((n / sum(n)) * 100, 1)
+    )
+  
+  # Teste estatístico
+  n_grupos <- length(unique(dados_analise[[var_name]]))
+  
+  if(n_grupos == 2) {
+    # Teste t para 2 grupos
+    grupo1 <- dados_analise %>% filter(.data[[var_name]] == unique(dados_analise[[var_name]])[1]) %>% pull(pedsqlglobal36)
+    grupo2 <- dados_analise %>% filter(.data[[var_name]] == unique(dados_analise[[var_name]])[2]) %>% pull(pedsqlglobal36)
+    
+    # Verificar se há dados suficientes
+    if(length(grupo1) > 1 & length(grupo2) > 1) {
+      teste <- try(t.test(grupo1, grupo2), silent = TRUE)
+      p_valor <- ifelse(class(teste)[1] == "try-error", NA, teste$p.value)
+    } else {
+      p_valor <- NA
+    }
+  } else if(n_grupos > 2) {
+    # ANOVA para mais de 2 grupos
+    teste <- try(aov(pedsqlglobal36 ~ factor(.data[[var_name]]), data = dados_analise), silent = TRUE)
+    if(class(teste)[1] != "try-error") {
+      p_valor <- summary(teste)[[1]][["Pr(>F)"]][1]
+    } else {
+      p_valor <- NA
+    }
+  } else {
+    p_valor <- NA
+  }
+  
+  # Adicionar valor p ao resumo
+  resumo <- resumo %>%
+    mutate(p_valor = p_valor) %>%
+    select(variavel, categoria, n, percentual, media, dp, p_valor)
+  
+  return(resumo)
+}
+
+# Lista de variáveis categóricas com seus labels
+vars_info <- list(
+  "idademaecat" = "Idade da mãe",
+  "pesocat" = "Peso ao nascimento", 
+  "igcat" = "Idade gestacional",
+  "partocat" = "Via de parto",
+  "lme6" = "Aleitamento materno exclusivo",
+  "corcat24" = "Etnia",
+  "estadocivilmae24" = "Estado civil da mãe",
+  "escolamaecat36" = "Escolaridade da mãe",
+  "abepcat36" = "Classe social",
+  "tanu" = "TANU",
+  "resultadotanu" = "Resultado TANU",
+  "resultqtai36" = "Resultado QTAI",
+  "creche36" = "Frequenta creche",
+  "ludicascat36" = "Atividades lúdicas",
+  "tempotelacat36" = "Tempo de tela",
+  "horacertacat36" = "Horário fixo para telas",
+  "telacasa36" = "Como usa telas em casa",
+  "telalimitetempocat36" = "Limite de tempo de tela",
+  "telainteracaocat36" = "Interação na tela",
+  "telalimiteconteudocat36" = "Limite de conteúdo",
+  "genero" = "Gênero",
+  "classcogbal36" = "Desenvolvimento Cognitivo",
+  "classcogcomp36" = "Desenvolvimento Cognitivo Composto",
+  "claslrbal36" = "Linguagem Receptiva",
+  "classlebal36" = "Linguagem Expressiva", 
+  "classlingcomp36" = "Linguagem Composto",
+  "classmfbal36" = "Motricidade Fina",
+  "classmgbal36" = "Motricidade Grossa",
+  "classmotorcomp36" = "Motricidade Composta"
+)
+
+# Criar tabela completa
+tabela_completa <- map2_dfr(names(vars_info), vars_info, criar_sumario)
+
+# Adicionar labels das categorias
+tabela_completa <- tabela_completa %>%
+  mutate(
+    categoria_label = case_when(
+      # Idade da mãe
+      variavel == "Idade da mãe" & categoria == "0" ~ "Adolescente",
+      variavel == "Idade da mãe" & categoria == "1" ~ "Adulta",
+      
+      # Peso ao nascimento
+      variavel == "Peso ao nascimento" & categoria == "0" ~ "< 2500g",
+      variavel == "Peso ao nascimento" & categoria == "1" ~ "≥ 2500g",
+      
+      # Idade gestacional
+      variavel == "Idade gestacional" & categoria == "0" ~ "< 37 semanas",
+      variavel == "Idade gestacional" & categoria == "1" ~ "≥ 37 semanas",
+      
+      # Via de parto
+      variavel == "Via de parto" & categoria == "0" ~ "Cesariana",
+      variavel == "Via de parto" & categoria == "1" ~ "Vaginal/Fórceps",
+      
+      # Aleitamento materno
+      variavel == "Aleitamento materno exclusivo" & categoria == "0" ~ "Não",
+      variavel == "Aleitamento materno exclusivo" & categoria == "1" ~ "Sim",
+      
+      # Etnia
+      variavel == "Etnia" & categoria == "0" ~ "Não branco",
+      variavel == "Etnia" & categoria == "1" ~ "Branco",
+      
+      # Estado civil
+      variavel == "Estado civil da mãe" & categoria == "0" ~ "Solteira/Divorciada",
+      variavel == "Estado civil da mãe" & categoria == "1" ~ "Casada/União estável",
+      
+      # Escolaridade
+      variavel == "Escolaridade da mãe" & categoria == "1" ~ "Ensino médio",
+      variavel == "Escolaridade da mãe" & categoria == "2" ~ "Superior/Pós",
+      variavel == "Escolaridade da mãe" & categoria == "3" ~ "Fundamental",
+      
+      # Desenvolvimento (0 = atraso, 1 = normal)
+      str_detect(variavel, "Desenvolvimento|Linguagem|Motricidade") & categoria == "0" ~ "Atraso",
+      str_detect(variavel, "Desenvolvimento|Linguagem|Motricidade") & categoria == "1" ~ "Normal",
+      
+      # Tempo de tela
+      variavel == "Tempo de tela" & categoria == "0" ~ "< 1h/dia",
+      variavel == "Tempo de tela" & categoria == "1" ~ "≥ 1h/dia",
+      
+      # Horário fixo para telas
+      variavel == "Horário fixo para telas" & categoria == "0" ~ "Não",
+      variavel == "Horário fixo para telas" & categoria == "1" ~ "Sim",
+      
+      # Limite de tempo
+      variavel == "Limite de tempo de tela" & categoria == "0" ~ "Não",
+      variavel == "Limite de tempo de tela" & categoria == "1" ~ "Sim",
+      
+      # Interação na tela
+      variavel == "Interação na tela" & categoria == "0" ~ "Não",
+      variavel == "Interação na tela" & categoria == "1" ~ "Sim",
+      
+      # Limite de conteúdo
+      variavel == "Limite de conteúdo" & categoria == "0" ~ "Não",
+      variavel == "Limite de conteúdo" & categoria == "1" ~ "Sim",
+      
+      # Para outras variáveis, manter categoria original
+      TRUE ~ categoria
+    ),
+    estatistica = paste0(media, " (±", dp, ")"),
+    n_percentual = paste0(n, " (", percentual, "%)")
+  ) %>%
+  group_by(variavel) %>%
+  mutate(
+    # Mostrar p-valor apenas na primeira linha de cada variável
+    p_valor_mostrar = ifelse(row_number() == 1, 
+                            case_when(
+                              is.na(p_valor) ~ "N/A",
+                              p_valor < 0.001 ~ "<0.001",
+                              TRUE ~ format(round(p_valor, 3), nsmall = 3)
+                            ), 
+                            "")
+  ) %>%
+  ungroup() %>%
+  select(Variável = variavel, Categoria = categoria_label, `N (%)` = n_percentual, `Média (DP)` = estatistica, `p-valor` = p_valor_mostrar)
+
+# Criar tabela com gt
+tabela_completa %>%
+  gt(groupname_col = "Variável") %>%
+  tab_header(
+    title = "Análise Descritiva das Variáveis Categóricas",
+    subtitle = "Frequência, porcentagem, estatísticas da Escala PEDSQL Global e testes de associação"
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = c("N (%)", "Média (DP)", "p-valor")
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "#f8f9fa"),
+      cell_text(weight = "bold")
+    ),
+    locations = cells_row_groups()
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "#d4edda"),
+      cell_text(weight = "bold", color = "#155724")
+    ),
+    locations = cells_body(
+      columns = "p-valor",
+      rows = `p-valor` != "" & (`p-valor` == "<0.001" | as.numeric(ifelse(`p-valor` == "N/A", NA, `p-valor`)) < 0.25)
+    )
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(color = "#6c757d")
+    ),
+    locations = cells_body(
+      columns = "p-valor",
+      rows = `p-valor` != "" & `p-valor` != "N/A" & as.numeric(`p-valor`) >= 0.25
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "DP = Desvio Padrão. Valores apresentados como Média (±Desvio Padrão). N (%) = Frequência absoluta (porcentagem). p-valor: teste t para 2 grupos, ANOVA para >2 grupos. Valores com p<0.25 destacados em verde (relevância potencial). Valores com p≥0.25 em cinza.",
+    locations = cells_column_labels(columns = "p-valor")
+  ) %>%
+  opt_table_font(font = "Arial") %>%
+  tab_options(
+    table.font.size = "14px",
+    heading.title.font.size = "16px",
+    heading.subtitle.font.size = "14px"
+  )
+```
+
+## Variaveis Numéricas
+
+```{r}
+vars_numericas <- c("pedsqlfisico36", "pedsqlpsico36", "pedsqlglobal36")
+numericas <- data %>% dplyr::select(all_of(vars_numericas))
+summary(numericas) %>%
+  knitr::kable(caption = "Sumário estatístico das variáveis numéricas/resposta") %>%
+  kableExtra::kable_styling()
+```
+
+# Variáveis resposta
+
+```{r}
+#| fig-cap: "Distribuição das Escalas PEDSQL"
+#| fig-width: 10
+#| fig-height: 6
+
+# respostas = numericas
+vars_resposta <- c("pedsqlfisico36", "pedsqlglobal36", "pedsqlpsico36")
+
+data_long <- data %>%
+  dplyr::select(all_of(vars_resposta)) %>%
+  tidyr::pivot_longer(cols = everything(), names_to = "Escala", values_to = "Score")
+
+ggplot(data_long, aes(x = Score)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 15, alpha = 0.7, 
+                 fill = "grey70", color = "black", linewidth = 0.3) +
+  geom_density(aes(y = after_stat(density)), color = "black", linewidth = 1.2) +
+  facet_wrap(~Escala, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distribuição das Escalas PEDSQL", 
+       x = "Score", 
+       y = "Densidade") +
+  theme(
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+## Teste de Normalidade
+
+```{r}
+#| tbl-cap: "Teste de Normalidade de Shapiro-Wilk para as Escalas PEDSQL"
+
+# Função para calcular teste de normalidade
+teste_normalidade <- function(var_name, var_data) {
+  dados_limpos <- var_data[!is.na(var_data)]
+  n <- length(dados_limpos)
+  
+  if(n < 3) {
+    return(data.frame(
+      Escala = var_name,
+      N = n,
+      Media = NA,
+      DP = NA,
+      W_Shapiro = NA,
+      p_valor = NA,
+      Interpretacao = "Amostra insuficiente"
+    ))
+  }
+  
+  # Teste de Shapiro-Wilk
+  shapiro_test <- shapiro.test(dados_limpos)
+  
+  # Estatísticas descritivas
+  media <- round(mean(dados_limpos), 2)
+  dp <- round(sd(dados_limpos), 2)
+  
+  # Interpretação
+  interpretacao <- ifelse(shapiro_test$p.value < 0.05, 
+                         "Não Normal (p<0.05)", 
+                         "Normal (p≥0.05)")
+  
+  return(data.frame(
+    Escala = var_name,
+    N = n,
+    Media = media,
+    DP = dp,
+    W_Shapiro = round(shapiro_test$statistic, 4),
+    p_valor = ifelse(shapiro_test$p.value < 0.001, 
+                      "<0.001", 
+                      format(round(shapiro_test$p.value, 3), nsmall = 3)),
+    Interpretacao = interpretacao,
+    stringsAsFactors = FALSE
+  ))
+}
+
+# Labels das escalas
+labels_escalas <- c(
+  "pedsqlfisico36" = "PEDSQL Físico",
+  "pedsqlpsico36" = "PEDSQL Psicossocial", 
+  "pedsqlglobal36" = "PEDSQL Global"
+)
+
+# Aplicar teste para cada escala
+resultados_normalidade <- map2_dfr(
+  vars_resposta,
+  map(vars_resposta, ~data[[.x]]),
+  teste_normalidade
+) %>%
+  mutate(
+    Escala = labels_escalas[Escala]
+  )
+
+# Criar tabela
+resultados_normalidade %>%
+  gt() %>%
+  tab_header(
+    title = "Teste de Normalidade das Escalas PEDSQL",
+    subtitle = "Teste de Shapiro-Wilk para verificação dos pressupostos"
+  ) %>%
+  cols_label(
+    W_Shapiro = "W (Shapiro-Wilk)",
+    p_valor = "p-valor",
+    Interpretacao = "Interpretação"
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = c("N", "Media", "DP", "W_Shapiro", "p_valor")
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "#ffe6e6"),
+      cell_text(weight = "bold", color = "#d73027")
+    ),
+    locations = cells_body(
+      columns = "Interpretacao",
+      rows = str_detect(Interpretacao, "Não Normal")
+    )
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "#d4edda"),
+      cell_text(weight = "bold", color = "#155724")
+    ),
+    locations = cells_body(
+      columns = "Interpretacao",
+      rows = str_detect(Interpretacao, "Normal")
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "H0: Os dados seguem distribuição normal. p<0.05 = rejeita H0 (não normal). Interpretação destacada: Verde = Normal, Vermelho = Não Normal.",
+    locations = cells_column_labels(columns = "p_valor")
+  ) %>%
+  opt_table_font(font = "Arial") %>%
+  tab_options(
+    table.font.size = "14px",
+    heading.title.font.size = "16px"
+  )
+```
+
+# Boxplot das Escalas PEDSQL
+
+```{r}
+#| fig-cap: "Boxplot das Escalas PEDSQL"
+#| fig-width: 8
+#| fig-height: 6
+
+ggplot(data_long, aes(x = Escala, y = Score, fill = Escala)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_grey(start = 0.3, end = 0.8) +
+  theme_minimal() +
+  labs(title = "Boxplot das Escalas PEDSQL", x = "Escala", y = "Score") +
+  theme(legend.position = "none")
+```
+
+# Associação das variáveis resposta (pedsqlglobal36)
+
+## Por gênero
+
+```{r}
+# Removi a tabela pois achei confusa a interpretacao da mediana/quantis
+# data %>%
+#   select(genero, all_of(vars_resposta)) %>%
+#   tbl_summary(by = genero, missing = "no") %>%
+#   add_overall() %>%
+#   bold_labels()
+```
+
+```{r}
+#| fig-cap: "PEDSQL Global por Gênero"
+
+ggplot(data, aes(x = genero, y = pedsqlglobal36, fill = genero)) +
+  geom_boxplot() +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(title = "PEDSQL Global por Gênero", x = "Gênero", y = "PEDSQL Global", fill = "Gênero")
+```
+
+## Por Faixa Etária Materna
+
+```{r}
+#| fig-cap: "PEDSQL Global por Faixa Etária Materna"
+
+idademaecat_label <- c("1" = "Adulta", "0" = "Adolescente")
+
+data %>%
+  dplyr::mutate(idademaecat_lab = recode(as.character(idademaecat), !!!idademaecat_label)) %>%
+  ggplot(aes(x = idademaecat_lab, y = pedsqlglobal36, fill = idademaecat_lab)) +
+  geom_boxplot() +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Faixa Etária Materna",
+    x = "Faixa Etária Materna",
+    y = "PEDSQL Global",
+    fill = "Faixa Etária Materna"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## Por Idade Gestacional
+
+```{r}
+#| fig-cap: "PEDSQL Global por Idade Gestacional"
+
+igcat_labels <- c("0" = "< 37 semanas", "1" = ">= 37 semanas")
+
+data %>%
+  mutate(igcat_lab = recode(as.character(igcat), !!!igcat_labels)) %>%
+  ggplot(aes(x = igcat_lab, y = pedsqlglobal36, fill = igcat_lab)) +
+  geom_boxplot() +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Idade Gestacional",
+    x = "Idade Gestacional",
+    y = "PEDSQL Global",
+    fill = "Idade Gestacional"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## Por Tipo de Parto
+
+```{r}
+#| fig-cap: "PEDSQL Global por Tipo de Parto"
+
+partocat_labels <- c("0" = "Cesárea", "1" = "Vaginal/Forcéps")
+
+data %>%
+  mutate(partocat_lab = recode(as.character(partocat), !!!partocat_labels)) %>%
+  ggplot(aes(x = partocat_lab, y = pedsqlglobal36, fill = partocat_lab)) +
+  geom_boxplot() +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Tipo de Parto",
+    x = "Tipo de Parto",
+    y = "PEDSQL Global",
+    fill = "Tipo de Parto"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+# Boxplots das Variáveis Categóricas vs PEDSQL Global
+
+## Variáveis Significativas (p < 0.05)
+
+### Via de Parto (p = 0.004)
+
+```{r}
+#| fig-cap: "PEDSQL Global por Via de Parto"
+#| fig-width: 8
+#| fig-height: 6
+
+partocat_labels <- c("0" = "Cesariana", "1" = "Vaginal/Fórceps")
+
+data %>%
+  filter(!is.na(partocat) & !is.na(pedsqlglobal36)) %>%
+  mutate(partocat_lab = recode(as.character(partocat), !!!partocat_labels)) %>%
+  ggplot(aes(x = partocat_lab, y = pedsqlglobal36, fill = partocat_lab)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Via de Parto",
+    subtitle = "p = 0.004 (significativo)",
+    x = "Via de Parto",
+    y = "PEDSQL Global",
+    fill = "Via de Parto"
+  ) +
+  theme(legend.position = "none")
+```
+
+### Tempo de Tela (p = 0.036)
+
+```{r}
+#| fig-cap: "PEDSQL Global por Tempo de Tela"
+#| fig-width: 8
+#| fig-height: 6
+
+tempotela_labels <- c("0" = "< 1h/dia", "1" = "≥ 1h/dia")
+
+data %>%
+  filter(!is.na(tempotelacat36) & !is.na(pedsqlglobal36)) %>%
+  mutate(tempotela_lab = recode(as.character(tempotelacat36), !!!tempotela_labels)) %>%
+  ggplot(aes(x = tempotela_lab, y = pedsqlglobal36, fill = tempotela_lab)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Tempo de Tela",
+    subtitle = "p = 0.036 (significativo)",
+    x = "Tempo de Tela por Dia",
+    y = "PEDSQL Global",
+    fill = "Tempo de Tela"
+  ) +
+  theme(legend.position = "none")
+```
+
+### Horário Fixo para Telas (p = 0.007)
+
+```{r}
+#| fig-cap: "PEDSQL Global por Horário Fixo para Telas"
+#| fig-width: 8
+#| fig-height: 6
+
+horacerta_labels <- c("0" = "Não", "1" = "Sim")
+
+data %>%
+  filter(!is.na(horacertacat36) & !is.na(pedsqlglobal36)) %>%
+  mutate(horacerta_lab = recode(as.character(horacertacat36), !!!horacerta_labels)) %>%
+  ggplot(aes(x = horacerta_lab, y = pedsqlglobal36, fill = horacerta_lab)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Horário Fixo para Telas",
+    subtitle = "p = 0.007 (significativo)",
+    x = "Horário Fixo para Telas",
+    y = "PEDSQL Global",
+    fill = "Horário Fixo"
+  ) +
+  theme(legend.position = "none")
+```
+
+### Limite de Tempo de Tela (p = 0.007)
+
+```{r}
+#| fig-cap: "PEDSQL Global por Limite de Tempo de Tela"
+#| fig-width: 8
+#| fig-height: 6
+
+limite_labels <- c("0" = "Não", "1" = "Sim")
+
+data %>%
+  filter(!is.na(telalimitetempocat36) & !is.na(pedsqlglobal36)) %>%
+  mutate(limite_lab = recode(as.character(telalimitetempocat36), !!!limite_labels)) %>%
+  ggplot(aes(x = limite_lab, y = pedsqlglobal36, fill = limite_lab)) +
+  geom_boxplot(alpha = 0.7) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
+  scale_fill_grey(start = 0.4, end = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Limite de Tempo de Tela",
+    subtitle = "p = 0.007 (significativo)",
+    x = "Limite de Tempo pelos Cuidadores",
+    y = "PEDSQL Global",
+    fill = "Limite de Tempo"
+  ) +
+  theme(legend.position = "none")
+```
+
+## Variáveis Demográficas e Perinatais
+
+```{r}
+#| fig-cap: "PEDSQL Global por Variáveis Demográficas e Perinatais"
+#| fig-width: 12
+#| fig-height: 10
+
+# Preparar dados para múltiplos boxplots
+plot_data <- data %>%
+  select(pedsqlglobal36, genero, idademaecat, pesocat, igcat, corcat24, estadocivilmae24) %>%
+  mutate(across(-pedsqlglobal36, as.character)) %>%  # Converter todas para character
+  pivot_longer(cols = -pedsqlglobal36, names_to = "variavel", values_to = "categoria") %>%
+  filter(!is.na(categoria) & !is.na(pedsqlglobal36)) %>%
+  mutate(
+    variavel_label = case_when(
+      variavel == "genero" ~ "Gênero",
+      variavel == "idademaecat" ~ "Idade da Mãe",
+      variavel == "pesocat" ~ "Peso ao Nascimento",
+      variavel == "igcat" ~ "Idade Gestacional",
+      variavel == "corcat24" ~ "Etnia",
+      variavel == "estadocivilmae24" ~ "Estado Civil da Mãe"
+    ),
+    categoria_label = case_when(
+      variavel == "genero" & categoria == "Feminino" ~ "Feminino",
+      variavel == "genero" & categoria == "Masculino" ~ "Masculino",
+      variavel == "idademaecat" & categoria == "0" ~ "Adolescente",
+      variavel == "idademaecat" & categoria == "1" ~ "Adulta",
+      variavel == "pesocat" & categoria == "0" ~ "< 2500g",
+      variavel == "pesocat" & categoria == "1" ~ "≥ 2500g",
+      variavel == "igcat" & categoria == "0" ~ "< 37 sem",
+      variavel == "igcat" & categoria == "1" ~ "≥ 37 sem",
+      variavel == "corcat24" & categoria == "0" ~ "Não branco",
+      variavel == "corcat24" & categoria == "1" ~ "Branco",
+      variavel == "estadocivilmae24" & categoria == "0" ~ "Solteira/Div",
+      variavel == "estadocivilmae24" & categoria == "1" ~ "Casada/União",
+      TRUE ~ as.character(categoria)
+    )
+  )
+
+ggplot(plot_data, aes(x = categoria_label, y = pedsqlglobal36, fill = categoria_label)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~variavel_label, scales = "free_x", ncol = 3) +
+  scale_fill_grey(start = 0.3, end = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Variáveis Demográficas e Perinatais",
+    x = "Categoria",
+    y = "PEDSQL Global"
+  ) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+## Variáveis de Desenvolvimento (Bayley)
+
+```{r}
+#| fig-cap: "PEDSQL Global por Variáveis de Desenvolvimento"
+#| fig-width: 12
+#| fig-height: 8
+
+# Preparar dados de desenvolvimento
+dev_data <- data %>%
+  select(pedsqlglobal36, classcogbal36, claslrbal36, classlebal36, 
+         classmfbal36, classmgbal36, classmotorcomp36) %>%
+  mutate(across(-pedsqlglobal36, as.character)) %>%  # Converter todas para character
+  pivot_longer(cols = -pedsqlglobal36, names_to = "variavel", values_to = "categoria") %>%
+  filter(!is.na(categoria) & !is.na(pedsqlglobal36)) %>%
+  mutate(
+    variavel_label = case_when(
+      variavel == "classcogbal36" ~ "Desenvolvimento\nCognitivo",
+      variavel == "claslrbal36" ~ "Linguagem\nReceptiva",
+      variavel == "classlebal36" ~ "Linguagem\nExpressiva",
+      variavel == "classmfbal36" ~ "Motricidade\nFina",
+      variavel == "classmgbal36" ~ "Motricidade\nGrossa",
+      variavel == "classmotorcomp36" ~ "Motricidade\nComposta"
+    ),
+    categoria_label = case_when(
+      categoria == "0" ~ "Atraso",
+      categoria == "1" ~ "Normal",
+      TRUE ~ as.character(categoria)
+    )
+  )
+
+ggplot(dev_data, aes(x = categoria_label, y = pedsqlglobal36, fill = categoria_label)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~variavel_label, ncol = 3) +
+  scale_fill_manual(values = c("Atraso" = "#404040", "Normal" = "#808080")) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Variáveis de Desenvolvimento (Bayley)",
+    x = "Status de Desenvolvimento",
+    y = "PEDSQL Global"
+  ) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold")
+  )
+```
+
+## Outras Variáveis de Interesse
+
+```{r}
+#| fig-cap: "PEDSQL Global por Outras Variáveis"
+#| fig-width: 12
+#| fig-height: 8
+
+# Preparar dados de outras variáveis
+outras_data <- data %>%
+  select(pedsqlglobal36, lme6, creche36, ludicascat36, resultqtai36) %>%
+  mutate(across(-pedsqlglobal36, as.character)) %>%  # Converter todas para character
+  pivot_longer(cols = -pedsqlglobal36, names_to = "variavel", values_to = "categoria") %>%
+  filter(!is.na(categoria) & !is.na(pedsqlglobal36)) %>%
+  mutate(
+    variavel_label = case_when(
+      variavel == "lme6" ~ "Aleitamento Materno\nExclusivo",
+      variavel == "creche36" ~ "Frequenta\nCreche",
+      variavel == "ludicascat36" ~ "Atividades\nLúdicas",
+      variavel == "resultqtai36" ~ "Resultado\nQTAI"
+    ),
+    categoria_label = case_when(
+      variavel %in% c("lme6", "creche36") & categoria == "0" ~ "Não",
+      variavel %in% c("lme6", "creche36") & categoria == "1" ~ "Sim",
+      variavel == "ludicascat36" & categoria == "adequado" ~ "Adequado",
+      variavel == "ludicascat36" & categoria == "inadequado" ~ "Inadequado",
+      variavel == "resultqtai36" ~ as.character(categoria),
+      TRUE ~ as.character(categoria)
+    )
+  )
+
+ggplot(outras_data, aes(x = categoria_label, y = pedsqlglobal36, fill = categoria_label)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~variavel_label, ncol = 2, scales = "free_x") +
+  scale_fill_grey(start = 0.3, end = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Outras Variáveis de Interesse",
+    x = "Categoria",
+    y = "PEDSQL Global"
+  ) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+
+# Boxplot Completo - Todas as Variáveis Categóricas
+
+```{r}
+#| fig-cap: "PEDSQL Global por Todas as Variáveis Categóricas"
+#| fig-width: 16
+#| fig-height: 20
+
+# Lista completa de todas as variáveis categóricas
+vars_categoricas_completas <- c(
+  "idademaecat", "pesocat", "igcat", "partocat", "lme6", "corcat24", "estadocivilmae24",
+  "escolamaecat36", "abepcat36", "tanu", "resultadotanu", "resultqtai36", "creche36",
+  "ludicascat36", "tempotelacat36", "horacertacat36", "telacasa36", "telalimitetempocat36",
+  "telainteracaocat36", "telalimiteconteudocat36", "genero", 
+  "classcogbal36", "classcogcomp36", "claslrbal36", "classlebal36", "classlingcomp36",
+  "classmfbal36", "classmgbal36", "classmotorcomp36"
+)
+
+# Preparar dados de todas as variáveis
+todas_vars_data <- data %>%
+  select(pedsqlglobal36, all_of(vars_categoricas_completas)) %>%
+  mutate(across(-pedsqlglobal36, as.character)) %>%
+  pivot_longer(cols = -pedsqlglobal36, names_to = "variavel", values_to = "categoria") %>%
+  filter(!is.na(categoria) & !is.na(pedsqlglobal36)) %>%
+  mutate(
+    # Criar labels das variáveis
+    variavel_label = case_when(
+      variavel == "idademaecat" ~ "Idade da Mãe",
+      variavel == "pesocat" ~ "Peso ao Nascimento", 
+      variavel == "igcat" ~ "Idade Gestacional",
+      variavel == "partocat" ~ "Via de Parto*",
+      variavel == "lme6" ~ "Aleitamento Materno",
+      variavel == "corcat24" ~ "Etnia",
+      variavel == "estadocivilmae24" ~ "Estado Civil da Mãe",
+      variavel == "escolamaecat36" ~ "Escolaridade da Mãe",
+      variavel == "abepcat36" ~ "Classe Social",
+      variavel == "tanu" ~ "TANU",
+      variavel == "resultadotanu" ~ "Resultado TANU",
+      variavel == "resultqtai36" ~ "Resultado QTAI",
+      variavel == "creche36" ~ "Frequenta Creche",
+      variavel == "ludicascat36" ~ "Atividades Lúdicas",
+      variavel == "tempotelacat36" ~ "Tempo de Tela*",
+      variavel == "horacertacat36" ~ "Horário Fixo Telas*",
+      variavel == "telacasa36" ~ "Como Usa Telas",
+      variavel == "telalimitetempocat36" ~ "Limite Tempo Tela*",
+      variavel == "telainteracaocat36" ~ "Interação na Tela",
+      variavel == "telalimiteconteudocat36" ~ "Limite Conteúdo",
+      variavel == "genero" ~ "Gênero",
+      variavel == "classcogbal36" ~ "Desenvolvimento Cognitivo",
+      variavel == "classcogcomp36" ~ "Desenvolvimento Cognitivo Comp.",
+      variavel == "claslrbal36" ~ "Linguagem Receptiva",
+      variavel == "classlebal36" ~ "Linguagem Expressiva", 
+      variavel == "classlingcomp36" ~ "Linguagem Composta",
+      variavel == "classmfbal36" ~ "Motricidade Fina",
+      variavel == "classmgbal36" ~ "Motricidade Grossa",
+      variavel == "classmotorcomp36" ~ "Motricidade Composta"
+    ),
+    # Criar labels das categorias
+    categoria_label = case_when(
+      # Variáveis binárias 0/1
+      variavel %in% c("idademaecat", "pesocat", "igcat", "partocat", "lme6", "corcat24", 
+                      "estadocivilmae24", "tempotelacat36", "horacertacat36", 
+                      "telalimitetempocat36", "telainteracaocat36", "telalimiteconteudocat36") & categoria == "0" ~ "Não/Menor",
+      variavel %in% c("idademaecat", "pesocat", "igcat", "partocat", "lme6", "corcat24", 
+                      "estadocivilmae24", "tempotelacat36", "horacertacat36", 
+                      "telalimitetempocat36", "telainteracaocat36", "telalimiteconteudocat36") & categoria == "1" ~ "Sim/Maior",
+      
+      # Variáveis de desenvolvimento
+      variavel %in% c("classcogbal36", "classcogcomp36", "claslrbal36", "classlebal36", 
+                      "classlingcomp36", "classmfbal36", "classmgbal36", "classmotorcomp36") & categoria == "0" ~ "Atraso",
+      variavel %in% c("classcogbal36", "classcogcomp36", "claslrbal36", "classlebal36", 
+                      "classlingcomp36", "classmfbal36", "classmgbal36", "classmotorcomp36") & categoria == "1" ~ "Normal",
+      
+      # Escolaridade
+      variavel == "escolamaecat36" & categoria == "1" ~ "Médio",
+      variavel == "escolamaecat36" & categoria == "2" ~ "Superior",
+      variavel == "escolamaecat36" & categoria == "3" ~ "Fundamental",
+      
+      # Outras variáveis específicas
+      TRUE ~ categoria
+    ),
+    # Marcar variáveis significativas
+    significativa = case_when(
+      variavel == "partocat" ~ "p=0.004",
+      variavel == "tempotelacat36" ~ "p=0.036", 
+      variavel == "horacertacat36" ~ "p=0.007",
+      variavel == "telalimitetempocat36" ~ "p=0.007",
+      variavel == "creche36" ~ "p=0.062",
+      variavel == "genero" ~ "p=0.136",
+      variavel == "classcogbal36" ~ "p=0.162",
+      variavel == "classcogcomp36" ~ "p=0.162",
+      variavel == "tanu" ~ "p=0.214",
+      TRUE ~ "n.s."
+    ),
+    # Combinar label da variável com significância
+    variavel_final = ifelse(significativa != "n.s.", 
+                           paste0(variavel_label, " (", significativa, ")"),
+                           variavel_label)
+  )
+
+# Criar o boxplot
+ggplot(todas_vars_data, aes(x = categoria_label, y = pedsqlglobal36, fill = significativa)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~variavel_final, scales = "free_x", ncol = 4) +
+  scale_fill_manual(
+    values = c("p=0.004" = "#404040", "p=0.036" = "#404040", 
+               "p=0.007" = "#404040", "p=0.062" = "#606060",
+               "p=0.136" = "#606060", "p=0.162" = "#606060", 
+               "p=0.214" = "#606060", "n.s." = "#d0d0d0"),
+    name = "Significância",
+    labels = c("p=0.004" = "p<0.01", "p=0.036" = "p<0.05", 
+               "p=0.007" = "p<0.01", "p=0.062" = "p<0.10",
+               "p=0.136" = "p<0.25", "p=0.162" = "p<0.25",
+               "p=0.214" = "p<0.25", "n.s." = "Não Relevante")
+  ) +
+  theme_minimal() +
+  labs(
+    title = "PEDSQL Global por Todas as Variáveis Categóricas",
+    subtitle = "Variáveis com p<0.25 destacadas (relevância potencial)",
+    x = "Categoria",
+    y = "PEDSQL Global"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    strip.text = element_text(face = "bold", size = 9),
+    legend.position = "bottom",
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+```
