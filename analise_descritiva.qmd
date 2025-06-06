@@ -3,17 +3,32 @@ title: "Rodada 2 - LabEst"
 format: 
   html:
     toc: true
+    toc-float: true
+    toc-collapsed: true
     toc-depth: 3
     theme: cosmo
     code-fold: true
     code-tools: true
     fig-width: 8
     fig-height: 6
+    number-sections: true
+  pdf:
+    toc: true
+    toc-depth: 3
+    echo: false
+    number-sections: true
+  docx:
+    toc: true
+    toc-depth: 3
+    echo: false
+    number-sections: true
 editor: visual
 execute:
   echo: true
   message: false
   warning: false
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup}
@@ -26,6 +41,8 @@ library(gt)
 library(gtsummary)
 library(kableExtra)
 library(reshape2)
+library(corrplot)
+library(car)
 ```
 
 # Importação e preparação dos dados
@@ -49,40 +66,60 @@ data <- data %>%
 ```{r}
 dict <- tribble(
   ~Variavel, ~Explicacao, ~Categorias,
-  "idademaecat", "Idade da mãe (Adulta: 1, Adolescente: 0)", "1: adulta, 0: adolescente",
-  "pesocat", "Peso ao nascimento (> ou igual 2500g: 1; <2500g: 0)", "1: >=2500g, 0: <2500g",
-  "igcat", "Idade gestacional ao nascimento (> ou igual 37s: 1; <37s: 0)", "1: >=37s, 0: <37s",
-  "partocat", "Via de parto (vaginal/fórceps: 1, cesariana: 0)", "1: vaginal/fórceps, 0: cesariana",
-  "lme6", "Aleitamento materno exclusivo aos 6 meses", "1: sim, 0: não",
-  "corcat24", "Etnia (branco: 1, não branco: 0)", "1: branco, 0: não branco",
-  "estadocivilmae24", "Estado civil mãe (casada/união estável: 1, solteira/divorciada: 0)", "1: casada/união, 0: solteira/div.",
-  "escolamaecat36", "Escolaridade mãe (2: superior/pos, 1: médio, 3: fundamental)", "2: superior/pós, 1: médio, 3: fundamental",
-  "abepcat36", "Classe social (A, B, C, DE)", "A, B, C, DE",
-  "tanu", "Triagem Auditiva Neonatal Universal", "Sim/Não",
-  "resultadotanu", "Resultado TANU", "Sim/Não",
-  "resultqtai36", "Resultado QTAI", "Positiva/Negativa",
-  "creche36", "Frequenta creche?", "Sim/Não",
-  "ludicascat36", "Atividades lúdicas (adequada: 4+, inadequada: 1-3)", "adequada/inadequada",
-  "tempotelacat36", "Tempo tela <1h/dia (1: usa 1h+, 0: menos de 1h)", "1: >=1h, 0: <1h",
-  "horacertacat36", "Horário fixo para telas (1: sim, 0: não)", "1: sim, 0: não",
-  "telacasa36", "Como usa telas em casa", "Adultos/Outra criança/Sozinho",
-  "telalimitetempocat36", "Limite de tempo pelos cuidadores", "1: sim, 0: não",
-  "telainteraçãocat36", "Interagem na tela?", "1: sim, 0: não",
-  "telalimiteconteudocat36", "Limitam o conteúdo?", "1: sim, 0: não",
-  "pedsqlfisico36", "Escala PEDSQL Físico (contínua)", "0-100",
-  "pedsqlpsico36", "Escala PEDSQL Psicológico (contínua)", "0-100",
-  "pedsqlglobal36", "Escala PEDSQL Global (contínua)", "0-100",
-  "genero", "Gênero da criança", "Feminino/Masculino",
-  "classcogbal36", "Desenvolvimento Cognitivo", "1: normal, 0: atraso",
-  "classcogcomp36", "Desenvolvimento Cognitivo Composto", "1: normal, 0: atraso",
-  "claslrbal36", "Domínio Linguagem Receptiva", "1: normal, 0: atraso",
-  "classlebal36", "Domínio Linguagem Expressiva", "1: normal, 0: atraso",
-  "classlingcomp36", "Domínio Linguagem Composto", "1: normal, 0: atraso",
-  "classmfbal36", "Domínio Motricidade Fina", "1: normal, 0: atraso",
-  "classmgbal36", "Domínio Motricidade Grossa", "1: normal, 0: atraso",
-  "classmotorcomp36", "Domínio Motricidade Composta", "1: normal, 0: atraso"
+  #--- Variáveis Sociodemográficas e Perinatais ---#
+  "idademaecat", "Categorização da idade da mãe da criança", "Adulta: 1 / Adolescente: 0",
+  "pesocat", "Categorização peso de nascimento da criança", ">= 2.500 g: 1 / < 2.500 g: 0",
+  "igcat", "Categorização da idade gestacional de nascimento da criança", ">= 37 semanas: 1 / < 37 semanas: 0",
+  "partocat", "Categorização da via de parto", "Vaginal ou fórceps: 1 / Cesariana: 0",
+  "lme6", "Criança em aleitamento materno exclusivo aos 6 meses de idade", "Sim: 1 / Não: 0",
+  "corcat24", "Categorização da etnia", "Branco: 1 / Não branco: 0",
+  "estadocivilmae24", "Estado civil da mãe da criança", "Casada ou em união estável: 1 / Solteira ou divorciada: 0",
+  "escolamaecat36", "Categorização da escolaridade da mãe da criança", "Superior/Pós: 1, Médio: 2, Fundamental: 3",
+  "abepcat36", "Categorização social pelo Critério Brasil - ABEP", "A, B, C, DE",
+  "genero", "Gênero", "Feminino/Masculino",
+  
+  #--- Triagem Auditiva ---#
+  "tanu", "A criança realizou a Triagem Auditiva Neonatal Universal (TANU)?", "Sim/Não",
+  "resultadotanu", "O resultado da TANU foi normal?", "Sim ou resultado desconhecido",
+  "resultqtai36", "Resultado do QTAI aos 36 meses", "Positivo: Risco / Negativo: Sem Risco",
+  
+  #--- Hábitos e Ambiente da Criança ---#
+  "creche36", "Criança frequentando creche", "Sim/Não",
+  "ludicascat36", "Categorização da quantidade de atividades lúdicas", "Adequada: 4+ / Inadequada: 1-3",
+  
+  #--- Uso de Telas ---#
+  "tempotelacat36", "Categorização do tempo de tela por dia", "Usa < 1h: 1 / Usa >= 1h: 0",
+  "horacertacat36", "Categorização do horário para usar telas", "Sempre: 1 / Às vezes ou Nunca: 0",
+  "telacasa36", "Maneira que a criança usa telas em casa", "Acompanhado (adultos), Acompanhado (criança), Sozinho",
+  "telalimitetempocat36", "Cuidadores limitam o tempo de uso de telas?", "Sim: 1 / Às vezes ou Não: 0",
+  "telainteraçãocat36", "Cuidadores interagem com a criança durante o uso de telas?", "Sim: 1 / Às vezes ou Não: 0",
+  "telalimiteconteudocat36", "Cuidadores limitam os conteúdos que a criança assiste em telas?", "Sim: 1 / Às vezes ou Não: 0",
+  
+  #--- Escala Peds-QL (Qualidade de Vida) ---#
+  "pedsqlfisico36", "Peds-QL - Escore Físico", "Contínuo (quanto maior, melhor)",
+  "pedsqlpsico36", "Peds-QL - Escore Psicossocial (Escolar + Emocional + Social)", "Contínuo (quanto maior, melhor)",
+  "pedsqlglobal36", "Peds-QL - Escore Global", "Contínuo (quanto maior, melhor)",
+  
+  #--- Escala Bayley (Desenvolvimento) ---#
+  "classcogbal36", "Bayley - Domínio Cognitivo Escore Balanceado - Classificação", "Normal: 1 / Atraso: 0",
+  "classcogcomp36", "Bayley - Domínio Cognitivo Escore Composto - Classificação", "Normal: 1 / Atraso: 0",
+  "claslrbal36", "Bayley - Domínio Linguagem Receptiva - Classificação", "Normal: 1 / Atraso: 0",
+  "classlebal36", "Bayley - Domínio Linguagem Expressiva - Classificação", "Normal: 1 / Atraso: 0",
+  "classlingcomp36", "Bayley - Domínio Linguagem Composto (Receptiva e Expressiva) - Classificação", "Normal: 1 / Atraso: 0",
+  "classmfbal36", "Bayley - Domínio Motor Fino - Classificação", "Normal: 1 / Atraso: 0",
+  "classmgbal36", "Bayley - Domínio Motor Grosso - Classificação", "Normal: 1 / Atraso: 0",
+  "classmotorcomp36", "Bayley - Domínio Motor Composto (Fino e Grosso) - Classificação", "Normal: 1 / Atraso: 0"
 )
-knitr::kable(dict, caption = "Dicionário resumido das variáveis") %>% kableExtra::kable_styling()
+```
+
+```{r}
+#| echo: false
+#| results: asis
+if (knitr::is_html_output()) {
+  knitr::kable(dict, caption = "Dicionário resumido das variáveis") %>% kableExtra::kable_styling(latex_options = "scale_down")
+} else {
+  knitr::kable(dict, caption = "Dicionário resumido das variáveis")
+}
 ```
 
 # Análise Univariada
@@ -90,15 +127,10 @@ knitr::kable(dict, caption = "Dicionário resumido das variáveis") %>% kableExt
 ## Variaveis Categóricas
 
 ```{r}
-#| tbl-cap: "Análise descritiva das variáveis categóricas com PEDSQL Global"
+#| tbl-cap: Análise descritiva das variáveis categóricas com PEDSQL Global
 
 # Função para criar sumário estatístico
 criar_sumario <- function(var_name, var_label) {
-  # Calcular total da variável (excluindo NAs)
-  total_var <- data %>%
-    filter(!is.na(.data[[var_name]])) %>%
-    nrow()
-  
   # Dados para análise
   dados_analise <- data %>%
     filter(!is.na(.data[[var_name]]) & !is.na(pedsqlglobal36))
@@ -110,6 +142,9 @@ criar_sumario <- function(var_name, var_label) {
       n = n(),
       media = round(mean(pedsqlglobal36, na.rm = TRUE), 2),
       dp = round(sd(pedsqlglobal36, na.rm = TRUE), 2),
+      mediana = round(median(pedsqlglobal36, na.rm = TRUE), 2),
+      q1 = round(quantile(pedsqlglobal36, 0.25, na.rm = TRUE), 2),
+      q3 = round(quantile(pedsqlglobal36, 0.75, na.rm = TRUE), 2),
       .groups = 'drop'
     ) %>%
     mutate(
@@ -118,215 +153,311 @@ criar_sumario <- function(var_name, var_label) {
       percentual = round((n / sum(n)) * 100, 1)
     )
   
-  # Teste estatístico
+  # Testes estatísticos
   n_grupos <- length(unique(dados_analise[[var_name]]))
+  p_valor_media <- NA
+  p_valor_mediana <- NA
   
-  if(n_grupos == 2) {
-    # Teste t para 2 grupos
+  if (n_grupos == 2) {
     grupo1 <- dados_analise %>% filter(.data[[var_name]] == unique(dados_analise[[var_name]])[1]) %>% pull(pedsqlglobal36)
     grupo2 <- dados_analise %>% filter(.data[[var_name]] == unique(dados_analise[[var_name]])[2]) %>% pull(pedsqlglobal36)
     
-    # Verificar se há dados suficientes
-    if(length(grupo1) > 1 & length(grupo2) > 1) {
-      teste <- try(t.test(grupo1, grupo2), silent = TRUE)
-      p_valor <- ifelse(class(teste)[1] == "try-error", NA, teste$p.value)
-    } else {
-      p_valor <- NA
+    if (length(grupo1) > 1 && length(grupo2) > 1) {
+      # Teste t (médias)
+      teste_t <- try(t.test(grupo1, grupo2), silent = TRUE)
+      p_valor_media <- if (inherits(teste_t, "try-error")) NA else teste_t$p.value
+      
+      # Teste de Wilcoxon (medianas)
+      teste_wilcox <- try(wilcox.test(grupo1, grupo2), silent = TRUE)
+      p_valor_mediana <- if (inherits(teste_wilcox, "try-error")) NA else teste_wilcox$p.value
     }
-  } else if(n_grupos > 2) {
-    # ANOVA para mais de 2 grupos
-    teste <- try(aov(pedsqlglobal36 ~ factor(.data[[var_name]]), data = dados_analise), silent = TRUE)
-    if(class(teste)[1] != "try-error") {
-      p_valor <- summary(teste)[[1]][["Pr(>F)"]][1]
-    } else {
-      p_valor <- NA
-    }
-  } else {
-    p_valor <- NA
+  } else if (n_grupos > 2) {
+    # ANOVA (médias)
+    teste_aov <- try(aov(pedsqlglobal36 ~ factor(.data[[var_name]]), data = dados_analise), silent = TRUE)
+    p_valor_media <- if (inherits(teste_aov, "try-error")) NA else summary(teste_aov)[[1]][["Pr(>F)"]][1]
+    
+    # Kruskal-Wallis (medianas)
+    teste_kruskal <- try(kruskal.test(pedsqlglobal36 ~ factor(.data[[var_name]]), data = dados_analise), silent = TRUE)
+    p_valor_mediana <- if (inherits(teste_kruskal, "try-error")) NA else teste_kruskal$p.value
   }
   
-  # Adicionar valor p ao resumo
+  # Adicionar p-valores ao resumo
   resumo <- resumo %>%
-    mutate(p_valor = p_valor) %>%
-    select(variavel, categoria, n, percentual, media, dp, p_valor)
+    mutate(p_valor_media = p_valor_media, p_valor_mediana = p_valor_mediana) %>%
+    select(variavel, categoria, n, percentual, media, dp, mediana, q1, q3, p_valor_media, p_valor_mediana)
   
   return(resumo)
 }
 
 # Lista de variáveis categóricas com seus labels
 vars_info <- list(
-  "idademaecat" = "Idade da mãe",
-  "pesocat" = "Peso ao nascimento", 
-  "igcat" = "Idade gestacional",
-  "partocat" = "Via de parto",
-  "lme6" = "Aleitamento materno exclusivo",
+  # Sociodemográficas e Perinatais
+  "idademaecat" = "Idade da Mãe",
+  "pesocat" = "Peso ao Nascer", 
+  "igcat" = "Idade Gestacional",
+  "partocat" = "Via de Parto",
+  "lme6" = "Ameitamento Exclusivo (6m)",
   "corcat24" = "Etnia",
-  "estadocivilmae24" = "Estado civil da mãe",
-  "escolamaecat36" = "Escolaridade da mãe",
-  "abepcat36" = "Classe social",
-  "tanu" = "TANU",
-  "resultadotanu" = "Resultado TANU",
-  "resultqtai36" = "Resultado QTAI",
-  "creche36" = "Frequenta creche",
-  "ludicascat36" = "Atividades lúdicas",
-  "tempotelacat36" = "Tempo de tela",
-  "horacertacat36" = "Horário fixo para telas",
-  "telacasa36" = "Como usa telas em casa",
-  "telalimitetempocat36" = "Limite de tempo de tela",
-  "telainteracaocat36" = "Interação na tela",
-  "telalimiteconteudocat36" = "Limite de conteúdo",
+  "estadocivilmae24" = "Estado Civil da Mãe",
+  "escolamaecat36" = "Escolaridade da Mãe",
+  "abepcat36" = "Classe Social (ABEP)",
   "genero" = "Gênero",
-  "classcogbal36" = "Desenvolvimento Cognitivo",
-  "classcogcomp36" = "Desenvolvimento Cognitivo Composto",
-  "claslrbal36" = "Linguagem Receptiva",
-  "classlebal36" = "Linguagem Expressiva", 
-  "classlingcomp36" = "Linguagem Composto",
-  "classmfbal36" = "Motricidade Fina",
-  "classmgbal36" = "Motricidade Grossa",
-  "classmotorcomp36" = "Motricidade Composta"
+  # Triagem Auditiva
+  "tanu" = "Realizou TANU?",
+  "resultadotanu" = "Resultado TANU",
+  "resultqtai36" = "Resultado QTAI (Risco para perda auditiva)",
+  # Hábitos e Ambiente
+  "creche36" = "Frequenta Creche?",
+  "ludicascat36" = "Atividades Lúdicas",
+  # Uso de Telas
+  "tempotelacat36" = "Tempo de Tela",
+  "horacertacat36" = "Horário Fixo para Telas",
+  "telacasa36" = "Como Usa Telas",
+  "telalimitetempocat36" = "Limite de Tempo (Telas)",
+  "telainteracaocat36" = "Interação Durante Tela",
+  "telalimiteconteudocat36" = "Limite de Conteúdo (Telas)",
+  # Escala Bayley
+  "classcogbal36" = "Bayley: Cognitivo",
+  "classcogcomp36" = "Bayley: Cognitivo (Comp.)",
+  "claslrbal36" = "Bayley: Ling. Receptiva",
+  "classlebal36" = "Bayley: Ling. Expressiva", 
+  "classlingcomp36" = "Bayley: Linguagem (Comp.)",
+  "classmfbal36" = "Bayley: Motor Fino",
+  "classmgbal36" = "Bayley: Motor Grosso",
+  "classmotorcomp36" = "Bayley: Motor (Comp.)"
 )
 
 # Criar tabela completa
 tabela_completa <- map2_dfr(names(vars_info), vars_info, criar_sumario)
 
-# Adicionar labels das categorias
+# Adicionar labels das categorias e corrigir inconsistências
 tabela_completa <- tabela_completa %>%
   mutate(
     categoria_label = case_when(
-      # Idade da mãe
-      variavel == "Idade da mãe" & categoria == "0" ~ "Adolescente",
-      variavel == "Idade da mãe" & categoria == "1" ~ "Adulta",
-      
-      # Peso ao nascimento
-      variavel == "Peso ao nascimento" & categoria == "0" ~ "< 2500g",
-      variavel == "Peso ao nascimento" & categoria == "1" ~ "≥ 2500g",
-      
-      # Idade gestacional
-      variavel == "Idade gestacional" & categoria == "0" ~ "< 37 semanas",
-      variavel == "Idade gestacional" & categoria == "1" ~ "≥ 37 semanas",
-      
-      # Via de parto
-      variavel == "Via de parto" & categoria == "0" ~ "Cesariana",
-      variavel == "Via de parto" & categoria == "1" ~ "Vaginal/Fórceps",
-      
-      # Aleitamento materno
-      variavel == "Aleitamento materno exclusivo" & categoria == "0" ~ "Não",
-      variavel == "Aleitamento materno exclusivo" & categoria == "1" ~ "Sim",
-      
-      # Etnia
-      variavel == "Etnia" & categoria == "0" ~ "Não branco",
+      # Variáveis Sociodemográficas e Perinatais
+      variavel == "Idade da Mãe" & categoria == "0" ~ "Adolescente",
+      variavel == "Idade da Mãe" & categoria == "1" ~ "Adulta",
+      variavel == "Peso ao Nascer" & categoria == "0" ~ "< 2500g",
+      variavel == "Peso ao Nascer" & categoria == "1" ~ "≥ 2500g",
+      variavel == "Idade Gestacional" & categoria == "0" ~ "< 37 sem.",
+      variavel == "Idade Gestacional" & categoria == "1" ~ "≥ 37 sem.",
+      variavel == "Via de Parto" & categoria == "0" ~ "Cesariana",
+      variavel == "Via de Parto" & categoria == "1" ~ "Vaginal/Fórceps",
+      variavel == "Ameitamento Exclusivo (6m)" & categoria == "0" ~ "Não",
+      variavel == "Ameitamento Exclusivo (6m)" & categoria == "1" ~ "Sim",
+      variavel == "Etnia" & categoria == "0" ~ "Não Branco",
       variavel == "Etnia" & categoria == "1" ~ "Branco",
+      variavel == "Estado Civil da Mãe" & categoria == "0" ~ "Solteira/Div.",
+      variavel == "Estado Civil da Mãe" & categoria == "1" ~ "Casada/União",
       
-      # Estado civil
-      variavel == "Estado civil da mãe" & categoria == "0" ~ "Solteira/Divorciada",
-      variavel == "Estado civil da mãe" & categoria == "1" ~ "Casada/União estável",
+      # Escolaridade da Mãe
+      variavel == "Escolaridade da Mãe" & categoria == "1" ~ "Superior/Pós",
+      variavel == "Escolaridade da Mãe" & categoria == "2" ~ "Médio",
+      variavel == "Escolaridade da Mãe" & categoria == "3" ~ "Fundamental",
       
-      # Escolaridade
-      variavel == "Escolaridade da mãe" & categoria == "1" ~ "Ensino médio",
-      variavel == "Escolaridade da mãe" & categoria == "2" ~ "Superior/Pós",
-      variavel == "Escolaridade da mãe" & categoria == "3" ~ "Fundamental",
+      # Escala Bayley (0 = atraso, 1 = normal)
+      str_detect(variavel, "Bayley:") & categoria == "0" ~ "Atraso",
+      str_detect(variavel, "Bayley:") & categoria == "1" ~ "Normal",
       
-      # Desenvolvimento (0 = atraso, 1 = normal)
-      str_detect(variavel, "Desenvolvimento|Linguagem|Motricidade") & categoria == "0" ~ "Atraso",
-      str_detect(variavel, "Desenvolvimento|Linguagem|Motricidade") & categoria == "1" ~ "Normal",
+      # Uso de Telas
+      variavel == "Tempo de Tela" & categoria == "1" ~ "< 1h/dia",
+      variavel == "Tempo de Tela" & categoria == "0" ~ "≥ 1h/dia",
+      variavel == "Horário Fixo para Telas" & categoria == "0" ~ "Não/Às vezes",
+      variavel == "Horário Fixo para Telas" & categoria == "1" ~ "Sempre",
+      variavel == "Limite de Tempo (Telas)" & categoria == "0" ~ "Não/Às vezes",
+      variavel == "Limite de Tempo (Telas)" & categoria == "1" ~ "Sim",
+      variavel == "Interação Durante Tela" & categoria == "0" ~ "Não/Às vezes",
+      variavel == "Interação Durante Tela" & categoria == "1" ~ "Sim",
+      variavel == "Limite de Conteúdo (Telas)" & categoria == "0" ~ "Não/Às vezes",
+      variavel == "Limite de Conteúdo (Telas)" & categoria == "1" ~ "Sim",
       
-      # Tempo de tela
-      variavel == "Tempo de tela" & categoria == "0" ~ "< 1h/dia",
-      variavel == "Tempo de tela" & categoria == "1" ~ "≥ 1h/dia",
-      
-      # Horário fixo para telas
-      variavel == "Horário fixo para telas" & categoria == "0" ~ "Não",
-      variavel == "Horário fixo para telas" & categoria == "1" ~ "Sim",
-      
-      # Limite de tempo
-      variavel == "Limite de tempo de tela" & categoria == "0" ~ "Não",
-      variavel == "Limite de tempo de tela" & categoria == "1" ~ "Sim",
-      
-      # Interação na tela
-      variavel == "Interação na tela" & categoria == "0" ~ "Não",
-      variavel == "Interação na tela" & categoria == "1" ~ "Sim",
-      
-      # Limite de conteúdo
-      variavel == "Limite de conteúdo" & categoria == "0" ~ "Não",
-      variavel == "Limite de conteúdo" & categoria == "1" ~ "Sim",
-      
-      # Para outras variáveis, manter categoria original
-      TRUE ~ categoria
+      # Para outras variáveis (ex: Gênero, Classe Social), manter a categoria original
+      TRUE ~ as.character(categoria)
     ),
-    estatistica = paste0(media, " (±", dp, ")"),
+    estatistica_media = paste0(media, " (±", dp, ")"),
+    estatistica_mediana = paste0(mediana, " (", q1, "–", q3, ")"),
     n_percentual = paste0(n, " (", percentual, "%)")
   ) %>%
   group_by(variavel) %>%
   mutate(
-    # Mostrar p-valor apenas na primeira linha de cada variável
-    p_valor_mostrar = ifelse(row_number() == 1, 
+    # Mostrar p-valor apenas na primeira linha de cada variável, formatado
+    p_valor_media_mostrar = ifelse(row_number() == 1, 
                             case_when(
-                              is.na(p_valor) ~ "N/A",
-                              p_valor < 0.001 ~ "<0.001",
-                              TRUE ~ format(round(p_valor, 3), nsmall = 3)
+                              is.na(p_valor_media) ~ "N/A",
+                              p_valor_media < 0.001 ~ "<0.1%",
+                              TRUE ~ paste0(format(round(p_valor_media * 100, 1), nsmall = 1), "%")
+                            ), 
+                            ""),
+    p_valor_mediana_mostrar = ifelse(row_number() == 1, 
+                            case_when(
+                              is.na(p_valor_mediana) ~ "N/A",
+                              p_valor_mediana < 0.001 ~ "<0.1%",
+                              TRUE ~ paste0(format(round(p_valor_mediana * 100, 1), nsmall = 1), "%")
                             ), 
                             "")
   ) %>%
   ungroup() %>%
-  select(Variável = variavel, Categoria = categoria_label, `N (%)` = n_percentual, `Média (DP)` = estatistica, `p-valor` = p_valor_mostrar)
+  select(
+    Variável = variavel, 
+    Categoria = categoria_label, 
+    `N (%)` = n_percentual, 
+    `Média (DP)` = estatistica_media,
+    `Mediana (IQR)` = estatistica_mediana,
+    p_valor_media, 
+    p_valor_mediana, 
+    `p-valor (Média)` = p_valor_media_mostrar, 
+    `p-valor (Mediana)` = p_valor_mediana_mostrar
+  )
 
 # Criar tabela com gt
-tabela_completa %>%
-  gt(groupname_col = "Variável") %>%
-  tab_header(
-    title = "Análise Descritiva das Variáveis Categóricas",
-    subtitle = "Frequência, porcentagem, estatísticas da Escala PEDSQL Global e testes de associação"
-  ) %>%
-  cols_align(
-    align = "center",
-    columns = c("N (%)", "Média (DP)", "p-valor")
-  ) %>%
-  tab_style(
-    style = list(
-      cell_fill(color = "#f8f9fa"),
-      cell_text(weight = "bold")
-    ),
-    locations = cells_row_groups()
-  ) %>%
-  tab_style(
-    style = list(
-      cell_fill(color = "#d4edda"),
-      cell_text(weight = "bold", color = "#155724")
-    ),
-    locations = cells_body(
-      columns = "p-valor",
-      rows = `p-valor` != "" & (`p-valor` == "<0.001" | as.numeric(ifelse(`p-valor` == "N/A", NA, `p-valor`)) < 0.25)
+if (knitr::is_html_output()) {
+  tabela_completa %>%
+    gt(groupname_col = "Variável") %>%
+    tab_header(
+      title = "Análise Descritiva das Variáveis e Associação com a Qualidade de Vida",
+      subtitle = "Frequências, estatísticas da Escala PEDSQL Global e testes de associação univariada"
+    ) %>%
+    cols_label(
+      `Média (DP)` = md("Média (DP)"),
+      `Mediana (IQR)` = md("Mediana (IQR)"),
+      `p-valor (Média)` = md("p (Média)"),
+      `p-valor (Mediana)` = md("p (Mediana)")
+    ) %>%
+    # Alinhamento das colunas
+    cols_align(
+      align = "center",
+      columns = c("N (%)", "Média (DP)", "Mediana (IQR)", "p-valor (Média)", "p-valor (Mediana)")
+    ) %>%
+    cols_align(
+      align = "left",
+      columns = "Categoria"
+    ) %>%
+    # Ocultar p-valor numérico
+    cols_hide(columns = c(p_valor_media, p_valor_mediana)) %>% 
+    # Estilo para os grupos de variáveis
+    tab_style(
+      style = list(
+        cell_fill(color = "#f8f9fa"),
+        cell_text(weight = "bold")
+      ),
+      locations = cells_row_groups()
+    ) %>%
+    # Adicionar linha separadora entre os grupos
+    tab_style(
+      style = cell_borders(
+        sides = "top",
+        color = "#dee2e6",
+        weight = px(2)
+      ),
+      locations = cells_row_groups(groups = everything())
+    ) %>%
+    # Indentar as categorias para melhor hierarquia
+    tab_style(
+      style = cell_text(indent = px(15)),
+      locations = cells_body(columns = Categoria)
+    ) %>%
+    # Estilo para p-valores < 0.25 (sugestivo)
+    tab_style(
+      style = list(
+        cell_fill(color = "#d4edda"),
+        cell_text(weight = "bold", color = "#155724")
+      ),
+      locations = cells_body(
+        columns = "p-valor (Média)",
+        rows = !is.na(p_valor_media) & p_valor_media < 0.25
+      )
+    ) %>%
+    tab_style(
+      style = list(
+        cell_fill(color = "#d4edda"),
+        cell_text(weight = "bold", color = "#155724")
+      ),
+      locations = cells_body(
+        columns = "p-valor (Mediana)",
+        rows = !is.na(p_valor_mediana) & p_valor_mediana < 0.25
+      )
+    ) %>%
+    # Estilo para p-valores >= 0.25
+    tab_style(
+      style = list(
+        cell_text(color = "#6c757d")
+      ),
+      locations = cells_body(
+        columns = "p-valor (Média)",
+        rows = !is.na(p_valor_media) & p_valor_media >= 0.25
+      )
+    ) %>%
+    tab_style(
+      style = list(
+        cell_text(color = "#6c757d")
+      ),
+      locations = cells_body(
+        columns = "p-valor (Mediana)",
+        rows = !is.na(p_valor_mediana) & p_valor_mediana >= 0.25
+      )
+    ) %>%
+    # Nota de rodapé
+    tab_footnote(
+      footnote = md("DP = Desvio Padrão; IQR = Amplitude Interquartil (Q1–Q3). Os p-valores indicam se a diferença nas médias (Teste T/ANOVA) ou medianas (Wilcoxon/Kruskal-Wallis) é significativa. **Valores de p < 0.25 (destacados)** sugerem uma associação a ser investigada no modelo multivariado."),
+      locations = cells_column_labels(columns = c("p-valor (Média)", "p-valor (Mediana)"))
+    ) %>%
+    # Opções gerais da tabela
+    opt_table_font(font = "Arial") %>%
+    tab_options(
+      table.font.size = "14px",
+      heading.title.font.size = "16px",
+      heading.subtitle.font.size = "14px",
+      row_group.padding = px(4)
     )
-  ) %>%
-  tab_style(
-    style = list(
-      cell_text(color = "#6c757d")
-    ),
-    locations = cells_body(
-      columns = "p-valor",
-      rows = `p-valor` != "" & `p-valor` != "N/A" & as.numeric(`p-valor`) >= 0.25
-    )
-  ) %>%
-  tab_footnote(
-    footnote = "DP = Desvio Padrão. Valores apresentados como Média (±Desvio Padrão). N (%) = Frequência absoluta (porcentagem). p-valor: teste t para 2 grupos, ANOVA para >2 grupos. Valores com p<0.25 destacados em verde (relevância potencial). Valores com p≥0.25 em cinza.",
-    locations = cells_column_labels(columns = "p-valor")
-  ) %>%
-  opt_table_font(font = "Arial") %>%
-  tab_options(
-    table.font.size = "14px",
-    heading.title.font.size = "16px",
-    heading.subtitle.font.size = "14px"
+} else {
+  knitr::kable(
+    tabela_completa %>% select(-p_valor_media, -p_valor_mediana), 
+    caption = "Análise Descritiva das Variáveis Categóricas"
   )
+}
 ```
+
+#### Como Interpretar a Tabela Acima
+
+A tabela acima é um resumo completo que nos ajuda a entender o perfil das crianças no estudo e a procurar por pistas sobre o que pode influenciar sua qualidade de vida (medida pela escala PEDSQL Global).
+
+-   **Coluna `N (%)`:** Mostra quantas crianças estão em cada categoria e qual a porcentagem que isso representa do total. Por exemplo, podemos ver a proporção de crianças que frequentam ou não a creche.
+-   **Coluna `Média (DP)`:** Apresenta a média da pontuação de qualidade de vida (PEDSQL Global) para cada grupo, junto com o Desvio Padrão (DP), que indica a variabilidade dos scores em torno da média.
+-   **Coluna `Mediana (IQR)`:** Apresenta a mediana da pontuação de qualidade de vida, com a Amplitude Interquartil (IQR), que mostra a variação dos 50% centrais dos dados. Como a distribuição da nossa variável resposta não é "normal" (simétrica), a mediana é uma medida de tendência central mais robusta que a média.
+-   **Colunas `p-valor`:** São resultados de testes estatísticos que comparam os grupos.
+    -   O `p (Média)` (Teste T/ANOVA) compara as médias e assume que os dados são normalmente distribuídos.
+    -   O `p (Mediana)` (Teste de Wilcoxon/Kruskal-Wallis) compara as medianas e não assume normalidade, sendo mais adequado para nosso caso.
+    -   De forma simplificada, o p-valor nos ajuda a responder: "A diferença que vemos entre os grupos é real ou provavelmente aconteceu por acaso?".
+
+**O que significam as cores?**
+
+Para não perdermos nenhuma associação potencialmente importante, decidimos (com base na reunião do dia 30/05) destacar em **verde** todas as variáveis com um **p-valor menor que 0.25** em qualquer um dos testes (média ou mediana). Isso não significa que a associação é definitivamente comprovada, mas sim que ela é um **candidato forte** para ser incluído em nossa próxima etapa de análise: a construção de um modelo estatístico multivariado. As variáveis com p-valor maior que 0.25 (em cinza) são consideradas menos prováveis de terem uma associação forte nesta análise inicial.
+
+#### Por que alguns p-valores são "N/A"?
+
+Você deve ter notado que algumas variáveis, como "Escolaridade da Mãe", "Classe Social" e "Resultado TANU", não têm um p-valor, aparecendo como "N/A" (Não Aplicável).
+
+Isso acontece quando o teste estatístico não pode ser calculado para aquela variável, por um dos seguintes motivos:
+
+1.  **Apenas um grupo possui dados:** Se uma variável tem apenas uma única categoria preenchida no nosso conjunto de dados (por exemplo, se *todos* os participantes tivessem realizado a TANU), não há um segundo grupo para fazer a comparação.
+2.  **Dados insuficientes para o teste ANOVA:** O teste ANOVA, usado para variáveis com 3 ou mais categorias (como escolaridade), precisa de um número mínimo de participantes em cada categoria para funcionar. Se um ou mais grupos tiverem apenas uma pessoa (ou nenhuma), o cálculo estatístico não é possível.
+
+Em resumo, um "N/A" significa que não foi possível realizar a comparação estatística de médias para aquela variável específica devido à distribuição dos dados disponíveis.
 
 ## Variaveis Numéricas
 
 ```{r}
+#| echo: false
 vars_numericas <- c("pedsqlfisico36", "pedsqlpsico36", "pedsqlglobal36")
 numericas <- data %>% dplyr::select(all_of(vars_numericas))
-summary(numericas) %>%
-  knitr::kable(caption = "Sumário estatístico das variáveis numéricas/resposta") %>%
-  kableExtra::kable_styling()
+tabela_numericas <- summary(numericas)
+
+if(knitr::is_html_output()){
+  knitr::kable(tabela_numericas, caption = "Sumário estatístico das variáveis numéricas/resposta") %>%
+    kableExtra::kable_styling(latex_options = "scale_down")
+} else {
+  knitr::kable(tabela_numericas, caption = "Sumário estatístico das variáveis numéricas/resposta")
+}
 ```
 
 # Variáveis resposta
@@ -362,6 +493,7 @@ ggplot(data_long, aes(x = Score)) +
 
 ```{r}
 #| tbl-cap: "Teste de Normalidade de Shapiro-Wilk para as Escalas PEDSQL"
+#| echo: false
 
 # Função para calcular teste de normalidade
 teste_normalidade <- function(var_name, var_data) {
@@ -424,50 +556,54 @@ resultados_normalidade <- map2_dfr(
   )
 
 # Criar tabela
-resultados_normalidade %>%
-  gt() %>%
-  tab_header(
-    title = "Teste de Normalidade das Escalas PEDSQL",
-    subtitle = "Teste de Shapiro-Wilk para verificação dos pressupostos"
-  ) %>%
-  cols_label(
-    W_Shapiro = "W (Shapiro-Wilk)",
-    p_valor = "p-valor",
-    Interpretacao = "Interpretação"
-  ) %>%
-  cols_align(
-    align = "center",
-    columns = c("N", "Media", "DP", "W_Shapiro", "p_valor")
-  ) %>%
-  tab_style(
-    style = list(
-      cell_fill(color = "#ffe6e6"),
-      cell_text(weight = "bold", color = "#d73027")
-    ),
-    locations = cells_body(
-      columns = "Interpretacao",
-      rows = str_detect(Interpretacao, "Não Normal")
+if (knitr::is_html_output()) {
+  resultados_normalidade %>%
+    gt() %>%
+    tab_header(
+      title = "Teste de Normalidade das Escalas PEDSQL",
+      subtitle = "Teste de Shapiro-Wilk para verificação dos pressupostos"
+    ) %>%
+    cols_label(
+      W_Shapiro = "W (Shapiro-Wilk)",
+      p_valor = "p-valor",
+      Interpretacao = "Interpretação"
+    ) %>%
+    cols_align(
+      align = "center",
+      columns = c("N", "Media", "DP", "W_Shapiro", "p_valor")
+    ) %>%
+    tab_style(
+      style = list(
+        cell_fill(color = "#ffe6e6"),
+        cell_text(weight = "bold", color = "#d73027")
+      ),
+      locations = cells_body(
+        columns = "Interpretacao",
+        rows = str_detect(Interpretacao, "Não Normal")
+      )
+    ) %>%
+    tab_style(
+      style = list(
+        cell_fill(color = "#d4edda"),
+        cell_text(weight = "bold", color = "#155724")
+      ),
+      locations = cells_body(
+        columns = "Interpretacao",
+        rows = str_detect(Interpretacao, "^Normal")
+      )
+    ) %>%
+    tab_footnote(
+      footnote = "H0: Os dados seguem distribuição normal. p<0.05 = rejeita H0 (não normal). Interpretação destacada: Verde = Normal, Vermelho = Não Normal.",
+      locations = cells_column_labels(columns = "p_valor")
+    ) %>%
+    opt_table_font(font = "Arial") %>%
+    tab_options(
+      table.font.size = "14px",
+      heading.title.font.size = "16px"
     )
-  ) %>%
-  tab_style(
-    style = list(
-      cell_fill(color = "#d4edda"),
-      cell_text(weight = "bold", color = "#155724")
-    ),
-    locations = cells_body(
-      columns = "Interpretacao",
-      rows = str_detect(Interpretacao, "Normal")
-    )
-  ) %>%
-  tab_footnote(
-    footnote = "H0: Os dados seguem distribuição normal. p<0.05 = rejeita H0 (não normal). Interpretação destacada: Verde = Normal, Vermelho = Não Normal.",
-    locations = cells_column_labels(columns = "p_valor")
-  ) %>%
-  opt_table_font(font = "Arial") %>%
-  tab_options(
-    table.font.size = "14px",
-    heading.title.font.size = "16px"
-  )
+} else {
+  knitr::kable(resultados_normalidade, caption = "Teste de Normalidade das Escalas PEDSQL")
+}
 ```
 
 # Boxplot das Escalas PEDSQL
@@ -516,7 +652,7 @@ ggplot(data, aes(x = genero, y = pedsqlglobal36, fill = genero)) +
 idademaecat_label <- c("1" = "Adulta", "0" = "Adolescente")
 
 data %>%
-  dplyr::mutate(idademaecat_lab = recode(as.character(idademaecat), !!!idademaecat_label)) %>%
+  dplyr::mutate(idademaecat_lab = dplyr::recode(as.character(idademaecat), !!!idademaecat_label)) %>%
   ggplot(aes(x = idademaecat_lab, y = pedsqlglobal36, fill = idademaecat_lab)) +
   geom_boxplot() +
   scale_fill_grey(start = 0.4, end = 0.7) +
@@ -538,7 +674,7 @@ data %>%
 igcat_labels <- c("0" = "< 37 semanas", "1" = ">= 37 semanas")
 
 data %>%
-  mutate(igcat_lab = recode(as.character(igcat), !!!igcat_labels)) %>%
+  mutate(igcat_lab = dplyr::recode(as.character(igcat), !!!igcat_labels)) %>%
   ggplot(aes(x = igcat_lab, y = pedsqlglobal36, fill = igcat_lab)) +
   geom_boxplot() +
   scale_fill_grey(start = 0.4, end = 0.7) +
@@ -560,7 +696,7 @@ data %>%
 partocat_labels <- c("0" = "Cesárea", "1" = "Vaginal/Forcéps")
 
 data %>%
-  mutate(partocat_lab = recode(as.character(partocat), !!!partocat_labels)) %>%
+  mutate(partocat_lab = dplyr::recode(as.character(partocat), !!!partocat_labels)) %>%
   ggplot(aes(x = partocat_lab, y = pedsqlglobal36, fill = partocat_lab)) +
   geom_boxplot() +
   scale_fill_grey(start = 0.4, end = 0.7) +
@@ -576,9 +712,11 @@ data %>%
 
 # Boxplots das Variáveis Categóricas vs PEDSQL Global
 
-## Variáveis Significativas (p < 0.05)
+## Boxplots para Variáveis com Associação Significativa (p < 0.05)
 
-### Via de Parto (p = 0.004)
+Como a variável resposta (PEDSQL Global) não apresentou distribuição normal, os gráficos a seguir mostram as variáveis que tiveram uma associação estatisticamente significativa (p < 0.05) com a qualidade de vida, com base no teste de comparação de medianas (Teste de Wilcoxon/Kruskal-Wallis), que é mais robusto para estes casos.
+
+### Via de Parto (p = 0.015)
 
 ```{r}
 #| fig-cap: "PEDSQL Global por Via de Parto"
@@ -589,7 +727,7 @@ partocat_labels <- c("0" = "Cesariana", "1" = "Vaginal/Fórceps")
 
 data %>%
   filter(!is.na(partocat) & !is.na(pedsqlglobal36)) %>%
-  mutate(partocat_lab = recode(as.character(partocat), !!!partocat_labels)) %>%
+  mutate(partocat_lab = dplyr::recode(as.character(partocat), !!!partocat_labels)) %>%
   ggplot(aes(x = partocat_lab, y = pedsqlglobal36, fill = partocat_lab)) +
   geom_boxplot(alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
@@ -597,7 +735,7 @@ data %>%
   theme_minimal() +
   labs(
     title = "PEDSQL Global por Via de Parto",
-    subtitle = "p = 0.004 (significativo)",
+    subtitle = "p = 0.015 (significativo - Teste de Mediana)",
     x = "Via de Parto",
     y = "PEDSQL Global",
     fill = "Via de Parto"
@@ -605,34 +743,7 @@ data %>%
   theme(legend.position = "none")
 ```
 
-### Tempo de Tela (p = 0.036)
-
-```{r}
-#| fig-cap: "PEDSQL Global por Tempo de Tela"
-#| fig-width: 8
-#| fig-height: 6
-
-tempotela_labels <- c("0" = "< 1h/dia", "1" = "≥ 1h/dia")
-
-data %>%
-  filter(!is.na(tempotelacat36) & !is.na(pedsqlglobal36)) %>%
-  mutate(tempotela_lab = recode(as.character(tempotelacat36), !!!tempotela_labels)) %>%
-  ggplot(aes(x = tempotela_lab, y = pedsqlglobal36, fill = tempotela_lab)) +
-  geom_boxplot(alpha = 0.7) +
-  geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
-  scale_fill_grey(start = 0.4, end = 0.7) +
-  theme_minimal() +
-  labs(
-    title = "PEDSQL Global por Tempo de Tela",
-    subtitle = "p = 0.036 (significativo)",
-    x = "Tempo de Tela por Dia",
-    y = "PEDSQL Global",
-    fill = "Tempo de Tela"
-  ) +
-  theme(legend.position = "none")
-```
-
-### Horário Fixo para Telas (p = 0.007)
+### Horário Fixo para Telas (p = 0.031)
 
 ```{r}
 #| fig-cap: "PEDSQL Global por Horário Fixo para Telas"
@@ -643,7 +754,7 @@ horacerta_labels <- c("0" = "Não", "1" = "Sim")
 
 data %>%
   filter(!is.na(horacertacat36) & !is.na(pedsqlglobal36)) %>%
-  mutate(horacerta_lab = recode(as.character(horacertacat36), !!!horacerta_labels)) %>%
+  mutate(horacerta_lab = dplyr::recode(as.character(horacertacat36), !!!horacerta_labels)) %>%
   ggplot(aes(x = horacerta_lab, y = pedsqlglobal36, fill = horacerta_lab)) +
   geom_boxplot(alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
@@ -651,7 +762,7 @@ data %>%
   theme_minimal() +
   labs(
     title = "PEDSQL Global por Horário Fixo para Telas",
-    subtitle = "p = 0.007 (significativo)",
+    subtitle = "p = 0.031 (significativo - Teste de Mediana)",
     x = "Horário Fixo para Telas",
     y = "PEDSQL Global",
     fill = "Horário Fixo"
@@ -659,7 +770,7 @@ data %>%
   theme(legend.position = "none")
 ```
 
-### Limite de Tempo de Tela (p = 0.007)
+### Limite de Tempo de Tela (p = 0.003)
 
 ```{r}
 #| fig-cap: "PEDSQL Global por Limite de Tempo de Tela"
@@ -670,7 +781,7 @@ limite_labels <- c("0" = "Não", "1" = "Sim")
 
 data %>%
   filter(!is.na(telalimitetempocat36) & !is.na(pedsqlglobal36)) %>%
-  mutate(limite_lab = recode(as.character(telalimitetempocat36), !!!limite_labels)) %>%
+  mutate(limite_lab = dplyr::recode(as.character(telalimitetempocat36), !!!limite_labels)) %>%
   ggplot(aes(x = limite_lab, y = pedsqlglobal36, fill = limite_lab)) +
   geom_boxplot(alpha = 0.7) +
   geom_jitter(width = 0.2, alpha = 0.5, size = 1.5) +
@@ -678,7 +789,7 @@ data %>%
   theme_minimal() +
   labs(
     title = "PEDSQL Global por Limite de Tempo de Tela",
-    subtitle = "p = 0.007 (significativo)",
+    subtitle = "p = 0.003 (significativo - Teste de Mediana)",
     x = "Limite de Tempo pelos Cuidadores",
     y = "PEDSQL Global",
     fill = "Limite de Tempo"
@@ -964,3 +1075,283 @@ ggplot(todas_vars_data, aes(x = categoria_label, y = pedsqlglobal36, fill = sign
     plot.subtitle = element_text(size = 12)
   )
 ```
+
+# Análise de Colinearidade e Correlação
+
+Antes de construir o modelo de regressão, é fundamental verificar a existência de **multicolinearidade** entre as variáveis preditoras. A multicolinearidade ocorre quando duas ou mais variáveis independentes estão fortemente correlacionadas.
+
+**Por que isso é um problema?**
+
+-   **Coeficientes instáveis:** Torna difícil avaliar o efeito individual de cada variável no modelo, pois seus coeficientes podem mudar drasticamente com pequenas alterações nos dados.
+-   **Interpretação difícil:** Complica a interpretação de qual variável está realmente influenciando a variável resposta.
+
+Para investigar isso, realizamos duas análises:
+
+1.  **Matriz de Correlação:** Visualiza a força da relação linear entre pares de variáveis. Valores próximos de +1 ou -1 indicam uma correlação forte.
+2.  **Fator de Inflação da Variância (VIF):** Mede o quanto a variância de um coeficiente de regressão estimado aumenta se as suas variáveis preditoras estiverem correlacionadas. Uma regra geral é que um **VIF > 5** indica um nível preocupante de colinearidade.
+
+## Matriz de Correlação
+
+```{r}
+#| label: matriz-correlacao
+#| fig-cap: "Matriz de correlação entre as variáveis preditoras do modelo"
+#| echo: false
+
+# Seleciona as variáveis candidatas para o modelo (p < 0.25 na mediana)
+vars_candidatas <- c(
+  "partocat", "lme6", "estadocivilmae24", "genero", "creche36",
+  "tempotelacat36", "horacertacat36", "telalimitetempocat36",
+  "telalimiteconteudocat36", "classcogcomp36", "classmfbal36", "classmgbal36"
+)
+
+# Prepara os dados para a matriz de correlação (convertendo tudo para numérico)
+data_corr <- data %>%
+  select(all_of(vars_candidatas)) %>%
+  mutate(
+    genero = if_else(genero == "Feminino", 0, 1), # F=0, M=1
+    creche36 = if_else(creche36 == "Não", 0, 1),  # Não=0, Sim=1
+    across(everything(), as.numeric)
+  ) %>%
+  na.omit()
+
+# Calcula a matriz de correlação
+matriz_cor <- cor(data_corr, use = "pairwise.complete.obs")
+
+# Renomeia as colunas para melhor visualização
+labels_corr <- c("Via de Parto", "Ameit. 6m", "Est. Civil Mãe", "Gênero", "Frequenta Creche",
+                        "Tela < 1h/dia", "Horário Fixo Tela", "Limite Tempo Tela",
+                        "Limite Conteúdo Tela", "Desenv. Cognitivo", "Desenv. Motor Fino", "Desenv. Motor Grosso")
+colnames(matriz_cor) <- labels_corr
+rownames(matriz_cor) <- labels_corr
+
+# Visualiza a matriz de correlação
+corrplot(matriz_cor, method = "color", type = "upper", order = "hclust",
+        addCoef.col = "black", # Adiciona o coeficiente na plotagem
+        tl.col = "black", tl.srt = 45, # Cor e rotação do texto
+        number.cex = 0.7, # Tamanho dos coeficientes
+        diag = FALSE)
+```
+
+## Fator de Inflação da Variância (VIF)
+
+Com base na matriz de correlação, observamos algumas correlações moderadas, especialmente entre as variáveis relacionadas ao uso de telas (por exemplo, `Horário Fixo Tela` e `Limite Tempo Tela` com r = 0.53). Para confirmar se essa e outras correlações são problemáticas para o modelo, calculamos o VIF.
+
+```{r}
+#| label: vif-calculation
+#| tbl-cap: "Valores do Fator de Inflação da Variância (VIF) para as variáveis preditoras"
+#| echo: false
+
+# Seleção de TODAS as variáveis candidatas (p < 0.25 na mediana)
+vars_candidatas <- c(
+  "partocat", "lme6", "estadocivilmae24", "genero", "creche36",
+  "tempotelacat36", "horacertacat36", "telalimitetempocat36",
+  "telalimiteconteudocat36", "classcogcomp36", "classmfbal36", "classmgbal36"
+)
+
+# Prepara os dados para o modelo (com fatores)
+model_data_vif <- data %>%
+  select(pedsqlglobal36, all_of(vars_candidatas)) %>%
+  mutate(
+    partocat = factor(partocat, levels = c(0, 1), labels = c("Cesariana", "Vaginal/Fórceps")),
+    lme6 = factor(lme6, levels = c(0, 1), labels = c("Não", "Sim")),
+    estadocivilmae24 = factor(estadocivilmae24, levels = c(0, 1), labels = c("Solteira/Div.", "Casada/União")),
+    creche36 = factor(creche36, levels = c("Não", "Sim")),
+    tempotelacat36 = factor(tempotelacat36, levels = c(0, 1), labels = c("≥ 1h/dia", "< 1h/dia")),
+    horacertacat36 = factor(horacertacat36, levels = c(0, 1), labels = c("Não/Às vezes", "Sempre")),
+    telalimitetempocat36 = factor(telalimitetempocat36, levels = c(0, 1), labels = c("Não/Às vezes", "Sim")),
+    telalimiteconteudocat36 = factor(telalimiteconteudocat36, levels = c(0, 1), labels = c("Não/Às vezes", "Sim")),
+    classcogcomp36 = factor(classcogcomp36, levels = c(0, 1), labels = c("Atraso", "Normal")),
+    classmfbal36 = factor(classmfbal36, levels = c(0, 1), labels = c("Atraso", "Normal")),
+    classmgbal36 = factor(classmgbal36, levels = c(0, 1), labels = c("Atraso", "Normal")),
+    across(where(is.character), as.factor)
+  ) %>%
+  na.omit()
+
+# Cria um modelo linear com todas as variáveis candidatas para checar o VIF
+modelo_vif <- lm(pedsqlglobal36 ~ ., data = model_data_vif)
+
+# Calcula e exibe os valores de VIF
+vif_valores <- vif(modelo_vif)
+tabela_vif <- tibble(
+  Variável = names(vif_valores),
+  VIF = vif_valores
+)
+
+# Exibe a tabela com kable
+knitr::kable(tabela_vif, digits = 2, caption = "Valores de Fator de Inflação de Variância (VIF)") %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+## Conclusão da Análise de Colinearidade
+
+A análise de VIF mostra que **nenhuma variável ultrapassa o valor de 5**, o que indica que a multicolinearidade não é um problema grave para a construção do nosso modelo. As correlações observadas, embora existentes (especialmente entre as variáveis de tela), não são fortes o suficiente para comprometer a estabilidade e a interpretação do modelo de regressão.
+
+Portanto, podemos prosseguir com todas as variáveis candidatas selecionadas para a etapa de modelagem *stepwise*.
+
+# Modelo de Regressão Multivariada
+
+Com base na análise de colinearidade, que não indicou problemas graves, prosseguimos para a construção do modelo de regressão linear múltipla. O objetivo é identificar as variáveis preditoras mais importantes para o escore `pedsqlglobal36`.
+
+**Metodologia:**
+
+1.  **Seleção de Candidatos:** Incluímos no modelo inicial todas as variáveis que mostraram associação potencial na análise univariada, com base no teste de medianas (p < 0.25).
+2.  **Verificação de Colinearidade:** A análise do Fator de Inflação de Variância (VIF) foi realizada e não indicou multicolinearidade problemática entre as variáveis candidatas.
+3.  **Seleção *Stepwise*:** Utilizamos um método estatístico automatizado (*stepwise*) para refinar o modelo, buscando o modelo mais parcimonioso com o maior poder explicativo.
+
+```{r}
+#| label: modelo-regressao
+#| tbl-cap: "Modelo final de regressão linear múltipla para os preditores da Qualidade de Vida (PEDSQL Global)"
+#| echo: false
+
+# Os dados (model_data_vif) e o modelo completo (modelo_vif) já foram criados na etapa de análise de VIF.
+# Reutilizamos eles aqui.
+n_modelo <- nrow(model_data_vif)
+
+# Seleção Stepwise a partir do modelo completo
+modelo_final <- step(modelo_vif, direction = "both", trace = 0)
+
+# Apresentação dos Resultados
+tbl_regression(modelo_final, intercept = TRUE) %>%
+  bold_p(t = 0.05) %>%
+  as_gt() %>%
+  gt::tab_header(
+    title = "Fatores Associados à Qualidade de Vida (PEDSQL Global)",
+    subtitle = "Resultado do modelo de regressão linear múltipla final (stepwise)"
+  ) %>%
+  gt::tab_source_note(
+    source_note = paste("Modelo construído com", n_modelo, "observações completas. O p-valor em negrito indica significância estatística (p < 0.05).")
+  )
+```
+
+## Interpretando o Modelo de Regressão
+
+A tabela acima mostra o resultado final do nosso modelo estatístico. O método *stepwise* selecionou as variáveis que, em conjunto, melhor explicam a variação na qualidade de vida (PEDSQL Global) das crianças.
+
+Cada linha representa uma variável ou categoria que se mostrou relevante:
+
+-   **`β (Estimativa)`:** Este número nos diz o quanto a qualidade de vida muda quando a variável em questão está presente (em comparação com a categoria de referência), mantendo todas as outras variáveis constantes.
+    -   Um valor **positivo** indica que a variável está associada a uma **maior** qualidade de vida.
+    -   Um valor **negativo** indica uma associação com uma **menor** qualidade de vida.
+-   **`p-value` (p-valor):** Indica a significância estatística daquela variável dentro do modelo. Um p-valor baixo (**< 0.05**, destacado em negrito) sugere que a associação observada é real e não fruto do acaso.
+
+**Exemplo de como interpretar:**
+
+Se a variável `Limite de Tempo de Tela (Sim)` tiver um `β` de `3.5` e for significativa, a interpretação seria: "Crianças cujos cuidadores sempre limitam o tempo de tela têm, em média, uma pontuação de qualidade de vida 3.5 pontos maior do que aquelas cujos cuidadores não limitam, mesmo controlando por outros fatores como classe social e desenvolvimento cognitivo."
+
+Variáveis que estavam na análise inicial mas **não aparecem no modelo final** foram consideradas não significativas após o ajuste pelas outras variáveis do modelo. Isso significa que a associação que elas pareciam ter na análise univariada era, na verdade, melhor explicada por outros fatores.
+
+# Análise de Colinearidade (Foco: Variáveis de Tela)
+
+Conforme discutido em reunião, uma preocupação central é a possível sobreposição (ou **multicolinearidade**) entre as diversas variáveis que medem o uso de telas. Se essas variáveis estiverem fortemente correlacionadas, torna-se difícil para o modelo de regressão distinguir o efeito individual de cada uma.
+
+Para investigar isso, realizamos duas análises:
+
+1.  **Matriz de Correlação:** Focada nas variáveis de tela para visualizar a força da relação entre elas.
+2.  **Fator de Inflação da Variância (VIF):** Calculado para todas as variáveis candidatas ao modelo, para dar um diagnóstico numérico da colinearidade. Uma regra geral é que um **VIF > 5** indica um nível preocupante de colinearidade.
+
+## Matriz de Correlação (Variáveis de Tela)
+
+```{r}
+#| label: matriz-correlacao-tela
+#| fig-cap: "Matriz de correlação entre as variáveis de uso de tela"
+#| echo: false
+
+# Seleciona apenas as variáveis de tela que são candidatas ao modelo
+vars_tela <- c(
+  "tempotelacat36", "horacertacat36", "telalimitetempocat36",
+  "telalimiteconteudocat36"
+)
+
+# Prepara os dados para a matriz de correlação
+data_corr_tela <- data %>%
+  select(all_of(vars_tela)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  na.omit()
+
+# Calcula a matriz de correlação
+matriz_cor_tela <- cor(data_corr_tela, use = "pairwise.complete.obs")
+
+# Renomeia as colunas para melhor visualização
+labels_corr_tela <- c("Tela < 1h/dia", "Horário Fixo", "Limite de Tempo", "Limite de Conteúdo")
+colnames(matriz_cor_tela) <- labels_corr_tela
+rownames(matriz_cor_tela) <- labels_corr_tela
+
+# Visualiza a matriz de correlação
+corrplot(matriz_cor_tela, method = "color", type = "upper", order = "hclust",
+        addCoef.col = "black", tl.col = "black", tl.srt = 45,
+        number.cex = 0.8, diag = FALSE)
+```
+
+A matriz de correlação confirma a suspeita: existe uma correlação positiva moderada entre ter um horário fixo e limitar o tempo de tela (r = 0.53). Isso é esperado, pois ambos refletem um comportamento de maior controle parental sobre o uso de telas. As outras correlações são fracas. Para verificar se essa correlação é forte o suficiente para prejudicar o modelo, usamos o teste VIF.
+
+## Fator de Inflação da Variância (VIF)
+
+Enquanto a matriz de correlação é útil para análises par a par, o VIF avalia a colinearidade de uma variável no contexto de **todas as outras preditoras do modelo**. Por isso, ele deve ser calculado com o conjunto completo de variáveis candidatas (aquelas com p < 0.25 na análise de mediana).
+
+```{r}
+#| label: vif-calculation
+#| tbl-cap: "Valores do Fator de Inflação da Variância (VIF) para as variáveis preditoras"
+#| echo: false
+
+# Seleção de TODAS as variáveis candidatas (p < 0.25 na mediana)
+vars_candidatas <- c(
+  "partocat", "lme6", "estadocivilmae24", "genero", "creche36",
+  "tempotelacat36", "horacertacat36", "telalimitetempocat36",
+  "telalimiteconteudocat36", "classcogcomp36", "classmfbal36", "classmgbal36"
+)
+
+# Prepara os dados para o modelo (com fatores)
+model_data_vif <- data %>%
+  select(pedsqlglobal36, all_of(vars_candidatas)) %>%
+  mutate(
+    partocat = factor(partocat, levels = c(0, 1), labels = c("Cesariana", "Vaginal/Fórceps")),
+    lme6 = factor(lme6, levels = c(0, 1), labels = c("Não", "Sim")),
+    estadocivilmae24 = factor(estadocivilmae24, levels = c(0, 1), labels = c("Solteira/Div.", "Casada/União")),
+    creche36 = factor(creche36, levels = c("Não", "Sim")),
+    tempotelacat36 = factor(tempotelacat36, levels = c(0, 1), labels = c("≥ 1h/dia", "< 1h/dia")),
+    horacertacat36 = factor(horacertacat36, levels = c(0, 1), labels = c("Não/Às vezes", "Sempre")),
+    telalimitetempocat36 = factor(telalimitetempocat36, levels = c(0, 1), labels = c("Não/Às vezes", "Sim")),
+    telalimiteconteudocat36 = factor(telalimiteconteudocat36, levels = c(0, 1), labels = c("Não/Às vezes", "Sim")),
+    classcogcomp36 = factor(classcogcomp36, levels = c(0, 1), labels = c("Atraso", "Normal")),
+    classmfbal36 = factor(classmfbal36, levels = c(0, 1), labels = c("Atraso", "Normal")),
+    classmgbal36 = factor(classmgbal36, levels = c(0, 1), labels = c("Atraso", "Normal")),
+    across(where(is.character), as.factor)
+  ) %>%
+  na.omit()
+
+# Cria um modelo linear com todas as variáveis candidatas para checar o VIF
+modelo_vif <- lm(pedsqlglobal36 ~ ., data = model_data_vif)
+
+# Calcula e exibe os valores de VIF
+vif_valores <- vif(modelo_vif)
+tabela_vif <- tibble(
+  Variável = names(vif_valores),
+  VIF = vif_valores
+)
+
+# Exibe a tabela com kable
+knitr::kable(tabela_vif, digits = 2, caption = "Valores de Fator de Inflação de Variância (VIF)") %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F)
+```
+
+## Conclusão da Análise de Colinearidade
+
+O teste de VIF confirma que **nenhuma variável, incluindo as de tela, ultrapassa o valor crítico de 5**. Isso significa que, embora exista uma correlação moderada entre `horacertacat36` e `telalimitetempocat36`, ela não é forte o suficiente para prejudicar a análise de regressão.
+
+Portanto, podemos prosseguir com a modelagem, mantendo todas as variáveis candidatas para a seleção *stepwise*.
+
+# Modelo de Regressão Multivariada
+
+Com base na análise de colinearidade, que não indicou problemas graves, prosseguimos para a construção do modelo de regressão linear múltipla. O objetivo é identificar as variáveis preditoras mais importantes para o escore `pedsqlglobal36`.
+
+**Metodologia:**
+
+1.  **Seleção de Candidatos:** Incluímos no modelo inicial todas as variáveis que mostraram associação potencial na análise univariada, com base no teste de medianas (p < 0.25).
+2.  **Verificação de Colinearidade:** A análise do Fator de Inflação de Variância (VIF) foi realizada e não indicou multicolinearidade problemática entre as variáveis candidatas.
+3.  **Seleção *Stepwise*:** Utilizamos um método estatístico automatizado (*stepwise*) para refinar o modelo, buscando o modelo mais parcimonioso com o maior poder explicativo.
+
+```{r}
+#| label: modelo-regressao
+# ... existing code ...
+
+</rewritten_file>

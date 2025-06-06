@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Sempre consulte os documentos disponiveis na pasta de docs, se fizer sentido
+
+- Sempre que for necessário, crie arquivos markdowns para registrar alguma grande alteração, processo, ou lista de tarefas ou planejamento. Essa é uma boa prática para manter registrado as ações, e ajudar você a se organizar, e também ajudar outros futuros devs a entender o processo.
+
+
+- O relatório deve ser feito levando em conta que o usuário final será pessoas que não são estatísticos, e por isso a linguagem não deve ser muito técnica
+
+- O relatório (gráficos e visualizaçãoes) deverá ser feito em cores mais voltadas para preto e branco, ou escalas disso, pois ele será publicado posteriormente, e não terá cores

@@ -1,0 +1,71 @@
+Reunião LabEst
+
+https://tldv.io/app/meetings/6839918f8a9ec50013af56a3/
+
+Ações Acordadas e Próximos Passos
+
+Thais planeja encontrar Edna para obter uma referência esta semana 00:20
+Equipe define modelo de trabalho e resolve pendências de carregamento de resultados na nuvem antes da próxima reunião 01:17
+Thais enviará e-mail para confirmar reunião na sexta-feira 51:20
+Próximas reuniões agendadas para refinamento do projeto em 3 e 13 do mês 51:57
+
+
+Análise de Dados e Modelagem Estatística
+
+Gabriela questiona se Marcelo compartilhou as análises mais recentes 00:39
+Discussão sobre análise de dados gestacionais e tipo de parto 00:44
+Equipe discute critérios de inclusão de modelo e aplica teste de qui-quadrado para associação de variáveis 13:46
+Equipe planeja selecionar variáveis significativas para modelo estatístico usando método stepwise 40:35
+Decisão de incluir variáveis com p-valor menor que 0.25 no modelo final 42:02
+Equipe planeja escolher variáveis abaixo de 0,25 para inclusão no modelo estatístico 44:31
+Thais sugere criar modelo com todas variáveis e realizar análise Stepway para explorar resultados 45:30
+Grupo decide fazer seleção manual de variáveis e ajustar modelo iterativamente 47:48
+Resultados do modelo serão apresentados na próxima semana, com código em repositório público e foco no projeto Global 50:33
+
+
+Preparação de Apresentação e Visualização de Dados
+
+Equipe prepara modelo para apresentação, definindo variáveis e formato de apresentação dos dados 03:03
+Thais propõe consolidar dados em tabela única, com Fabrício questionando variável resposta do estudo 04:00
+Discutir possibilidade de adicionar coluna de porcentagem na tabela de frequência. 08:33
+Confirmada a utilização de frequência absoluta na tabela. 08:48
+Fabrício propõe apresentar dois métodos de análise. 09:11
+Thais sugere incluir tabela completa com todas as variáveis no material complementar do trabalho. 12:02
+Verificar formatação em negrito para resultados não significativos. 14:17
+Gabriela sugere destacar apenas estatísticas significativas do estudo 19:27
+Thais identifica necessidade de adicionar estatísticas descritivas além das tabelas existentes 19:42
+Equipe planeja criar Box Plot para comparar médias entre variáveis e identificar diferenças significativas. 21:26
+Decisão de criar Box Plot para todas as variáveis, com destaque para as diferenças mais relevantes. 22:02
+Gabriela sugere converter gráficos para escala de cinza para publicação 35:47
+
+
+Variáveis e Escalas de Avaliação
+
+Variável 36 identificada sem detalhes adicionais de contexto 24:18
+Dados utilizados estão em escala de cinco pontos, não na escala de 0 a 100 24:26
+Equipe explora variáveis relacionadas às crianças, revisando categorização e significado de variáveis 24:53
+Projeto focado em risco de perda auditiva e seu impacto na qualidade de vida infantil 27:21
+Em cenário ideal, espera-se encontrar variáveis relacionadas a aspectos físicos e sociais. 27:45
+Escala Bayley avalia desenvolvimento motor, cognitivo e de linguagem em crianças 29:52
+Pontuação abaixo de 85 na escala Bayley indica atraso no desenvolvimento infantil 30:09
+Equipe verificando quais variáveis poderiam ser contínuas. 44:08
+
+
+Análise Estatística Avançada
+
+Equipe discutirá necessidade de testar normalidade dos dados 17:24
+Considerar testes não paramétricos para análise quando dados não seguem distribuição normal 17:46
+Gabriela propõe modelo com todos os dados, considerando limitações da amostra e potencial inclusão de variáveis 18:04
+Thais sugere documentar resultados do questionário com Valores P 35:35
+
+
+Considerações sobre Projeto Global
+
+Discussão preliminar sobre os Box do projeto Global 52:31
+
+
+Tarefas em Andamento
+
+Tarefa de investigar o status da terra em andamento 25:34
+Verificar estado de codificação do evento ou sistema em questão. 32:49
+
