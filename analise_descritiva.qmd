@@ -44,6 +44,10 @@ library(reshape2)
 library(corrplot)
 library(car)
 library(broom.helpers)
+library(broom)
+library(ggstats)
+library(betareg)
+# library(patchwork)  # desabilitado: não necessário
 ```
 
 # Importação e preparação dos dados
@@ -218,21 +222,21 @@ vars_info <- list(
   "lme6" = "Aleitamento Exclusivo (6m)",
   "corcat24" = "Etnia",
   "estadocivilmae24" = "Estado Civil da Mãe",
-  "escolamaecat36" = "Escolaridade da Mãe",
-  "abepcat36" = "Classe Social (ABEP)",
+  "escolamaecat36" = "Categorização da escolaridade da mãe da criança",
+  "abepcat36" = "Categorização social pelo Critério Brasil - ABEP",
   "genero" = "Gênero",
   # Triagem Auditiva
   "resultqtai36" = "Resultado QTAI (Risco para perda auditiva)",
   # Hábitos e Ambiente
-  "creche36" = "Frequenta Creche?",
-  "ludicascat36" = "Atividades Lúdicas",
+  "creche36" = "Criança frequentando creche",
+  "ludicascat36" = "Categorização da quantidade de atividades lúdicas",
   # Uso de Telas
-  "tempotelacat36" = "Tempo de Tela",
-  "horacertacat36" = "Horário Fixo para Telas",
-  "telacasa36" = "Como Usa Telas",
-  "telalimitetempocat36" = "Limite de Tempo (Telas)",
-  "telainteracaocat36" = "Interação Durante Tela",
-  "telalimiteconteudocat36" = "Limite de Conteúdo (Telas)",
+  "tempotelacat36" = "Categorização do tempo de tela por dia",
+  "horacertacat36" = "Categorização do horário para usar telas",
+  "telacasa36" = "Maneira que a criança usa telas em casa",
+  "telalimitetempocat36" = "Cuidadores limitam o tempo de uso de telas?",
+  "telainteracaocat36" = "Cuidadores interagem com a criança durante o uso de telas?",
+  "telalimiteconteudocat36" = "Cuidadores limitam os conteúdos que a criança assiste em telas?",
   # Escala Bayley
   "classcogcomp36" = "Bayley: Cognitivo (Comp.)",
   "claslrbal36" = "Bayley: Ling. Receptiva",
@@ -451,14 +455,13 @@ Para não perdermos nenhuma associação potencialmente importante, decidimos (c
 
 #### Por que alguns p-valores são "N/A"?
 
-Você deve ter notado que algumas variáveis, como "Escolaridade da Mãe", "Classe Social" e "Resultado TANU", não têm um p-valor, aparecendo como "N/A" (Não Aplicável).
+Você notou corretamente que variáveis com mais de duas categorias, como "Escolaridade da Mãe", "Classe Social" e "Como Usa Telas", não apresentam um p-valor, aparecendo como "N/A".
 
-Isso acontece quando o teste estatístico não pode ser calculado para aquela variável, por um dos seguintes motivos:
+Isso acontece porque os testes estatísticos usados para comparar três ou mais grupos (como **ANOVA** para médias ou **Kruskal-Wallis** para medianas) exigem um número mínimo de participantes em *cada* categoria para produzir um resultado válido. Em nosso conjunto de dados, algumas categorias dentro dessas variáveis têm um número muito pequeno de observações (por exemplo, apenas 5 crianças no grupo "Fundamental" de escolaridade da mãe). Quando o teste tenta rodar com um grupo tão pequeno, ele não consegue fazer uma comparação estatisticamente confiável e falha.
 
-1.  **Apenas um grupo possui dados:** Se uma variável tem apenas uma única categoria preenchida no nosso conjunto de dados (por exemplo, se *todos* os participantes tivessem realizado a TANU), não há um segundo grupo para fazer a comparação.
-2.  **Dados insuficientes para o teste ANOVA:** O teste ANOVA, usado para variáveis com 3 ou mais categorias (como escolaridade), precisa de um número mínimo de participantes em cada categoria para funcionar. Se um ou mais grupos tiverem apenas uma pessoa (ou nenhuma), o cálculo estatístico não é possível.
+**Isso é um problema?**
 
-Em resumo, um "N/A" significa que não foi possível realizar a comparação estatística de médias para aquela variável específica devido à distribuição dos dados disponíveis.
+Não para o nosso objetivo final. A ausência de um p-valor aqui é uma limitação da *análise univariada*, mas não nos impede de investigar a importância dessas variáveis no modelo de regressão. Como parte da nossa estratégia de modelagem, **nós incluímos proativamente todas as variáveis com p-valor "N/A" como candidatas**, garantindo que elas tenham a oportunidade de serem avaliadas no contexto multivariado, onde o modelo consegue lidar melhor com essas situações.
 
 ## Variaveis Numéricas
 
@@ -1366,120 +1369,728 @@ O VIF nos ajuda a identificar se alguma variável de tela é redundante com as o
 
 **Implicações para o modelo:** Se encontrarmos variáveis de tela com VIF alto, isso sugere que elas medem aspectos muito similares do comportamento de uso de telas. Nesse caso, podemos optar por manter apenas a variável mais relevante clinicamente ou criar um índice composto.
 
-# Modelagem de Regressão Linear Múltipla
+# Modelagem de Regressão Multivariada
 
-## Introdução
+Nesta seção, nosso objetivo é construir um modelo estatístico para entender quais fatores estão mais fortemente associados à qualidade de vida das crianças, medida pelo escore `pedsqlglobal36`. Como vimos na análise univariada, diversas variáveis parecem ter alguma associação, mas um modelo multivariado nos ajuda a entender a contribuição de cada uma quando consideramos todas ao mesmo tempo.
 
-Nesta seção, ajustamos modelos de regressão linear múltipla para investigar quais fatores estão associados à qualidade de vida (PEDSQL Global) das crianças. O objetivo é identificar quais variáveis permanecem associadas à qualidade de vida após o ajuste conjunto, considerando diferentes blocos de variáveis (saúde, contexto social, desenvolvimento). Os resultados são apresentados de forma acessível, com foco na interpretação prática.
+### Estratégia de Modelagem
 
-## Seleção das Variáveis Candidatas (p < 0.25)
+Para encontrar o modelo mais robusto e interpretável, adotaremos a seguinte estratégia:
+
+1.  **Seleção de Variáveis Candidatas:** Começaremos com as variáveis que mostraram alguma associação potencial na análise univariada. Adotamos o critério de incluir todas as variáveis com **p-valor < 0.25** em qualquer um dos testes (comparação de médias ou medianas). Essa abordagem mais liberal na fase inicial evita a exclusão prematura de variáveis que podem ser importantes no contexto multivariado. Também incluiremos variáveis cujo p-valor não pôde ser calculado (N/A) por limitações amostrais.
+
+2.  **Construção e Comparação de Modelos:** Construiremos e compararemos três modelos diferentes:
+    *   **Modelo 1 (Completo):** Um modelo inicial com todas as variáveis candidatas.
+    *   **Modelo 2 (Hierárquico):** Um modelo em blocos, adicionando grupos de variáveis em uma ordem teórica (ex: fatores perinatais, depois contexto social, e por último, desenvolvimento).
+    *   **Modelo 3 (Stepwise):** Um modelo otimizado por um algoritmo (AIC) para fins de exploração e comparação.
+
+3.  **Diagnóstico e Interpretação:** Todos os modelos serão avaliados quanto à sua adequação (ex: análise de resíduos) e a multicolinearidade será verificada (VIF). O modelo final será escolhido com base no ajuste estatístico, na simplicidade e, crucialmente, na sua capacidade de responder às perguntas da pesquisa de forma clara.
+
+### Fase 1: Preparação e Construção do Modelo Completo
+
+#### Seleção de Variáveis Candidatas
+
+Primeiro, vamos identificar programaticamente as variáveis candidatas com base no critério definido: variáveis com **p-valor (Mediana) < 0.25** na análise univariada e aquelas cujo p-valor não pôde ser calculado (**N/A**).
 
 ```{r}
-# Selecionar variáveis candidatas com p < 0.25 no teste de mediana
-candidatas <- tabela_completa %>%
-  filter(!is.na(p_valor_mediana) & p_valor_mediana < 0.25) %>%
+#| label: selecionar-variaveis-candidatas
+#| echo: true
+
+# Inverter o mapa de variáveis para facilitar a busca pelo nome
+map_vars_invertido <- setNames(names(vars_info), unlist(vars_info))
+
+# Filtrar a tabela de resultados para obter variáveis candidatas
+# Critério: p-valor da mediana < 0.25 ou p-valor não aplicável (N/A)
+vars_candidatas_nomes <- tabela_completa %>%
+  filter(p_valor_mediana < 0.25 | is.na(p_valor_mediana)) %>%
   distinct(Variável) %>%
   pull(Variável)
 
-# Mapear para nomes originais das variáveis
-map_vars <- setNames(names(vars_info), unlist(vars_info))
-vars_candidatas <- map_vars[candidatas]
-vars_candidatas <- vars_candidatas[!is.na(vars_candidatas)]
+# Mapear os nomes de volta para os nomes das variáveis no dataset
+vars_candidatas <- map_vars_invertido[vars_candidatas_nomes] %>%
+  unname()
 
-# Visualizar variáveis candidatas
-vars_candidatas
+# Mostrar as variáveis selecionadas
+cat("Variáveis candidatas selecionadas para o modelo (p-mediana < 0.25 ou N/A):\n")
+cat(paste("- `", vars_candidatas, "`", collapse = "\n"), sep = "\n")
 ```
 
-## Definição dos Blocos para Modelagem Hierárquica
+#### Modelo 1: Modelo de Regressão Completo
+
+Agora, ajustamos o primeiro modelo de regressão linear incluindo todas as variáveis candidatas que selecionamos. Este modelo nos dará uma visão inicial de quais variáveis se destacam quando analisadas em conjunto.
 
 ```{r}
-# Bloco 1: Saúde
-bloco_saude <- intersect(vars_candidatas, c("partocat", "lme6"))
+#| label: modelo-completo
+#| tbl-cap: "Modelo de Regressão Linear Completo para o Escore PEDSQL Global"
+#| echo: true
 
-# Bloco 2: Contexto social
-bloco_social <- intersect(vars_candidatas, c(
-  "estadocivilmae24", "creche36",
-  "tempotelacat36", "horacertacat36", "telacasa36", 
-  "telalimitetempocat36", "telainteracaocat36", "telalimiteconteudocat36"
-))
+# Criar a fórmula do modelo dinamicamente
+formula_completa <- as.formula(
+  paste("pedsqlglobal36 ~", paste(vars_candidatas, collapse = " + "))
+)
+cat("Fórmula do modelo:\n")
+print(formula_completa)
+cat("\n")
 
-# Bloco 3: Desenvolvimento
-bloco_desenvolvimento <- intersect(vars_candidatas, c(
-  "classcogcomp36", "classmfbal36", "classmgbal36", "classmotorcomp36"
-))
+# Ajustar o modelo linear
+modelo_completo <- lm(formula_completa, data = data, na.action = na.exclude)
 
-# Visualizar blocos
-list(Saude = bloco_saude, Social = bloco_social, Desenvolvimento = bloco_desenvolvimento)
-```
+# Criar a tabela de regressão para ser usada tanto na tabela quanto no gráfico
+tbl_modelo_completo <- tbl_regression(
+  modelo_completo,
+  exponentiate = FALSE,
+  pvalue_fun = ~style_pvalue(.x, digits = 3),
+  intercept = TRUE
+)
 
-## Modelo Completo (Todas as Variáveis Candidatas)
-
-```{r}
-# Preparar dados para o modelo completo
-modelo_vars <- vars_candidatas
-
-data_modelo <- data %>%
-  select(pedsqlglobal36, all_of(modelo_vars)) %>%
-  na.omit()
-
-# Ajustar modelo completo
-modelo_completo <- lm(pedsqlglobal36 ~ ., data = data_modelo)
-
-# Resultados do modelo completo
-summary_completo <- broom::tidy(modelo_completo, conf.int = TRUE)
-
-# Apresentar resultados
-summary_completo %>%
-  filter(term != "(Intercept)") %>%
-  mutate(
-    p.value = format.pval(p.value, digits = 2, eps = 0.001),
-    signif = ifelse(as.numeric(p.value) < 0.05, "*", "")
+# Apresentar o modelo em formato de tabela
+tbl_modelo_completo %>%
+  bold_p(t = 0.05) %>%
+  add_glance_table(
+    include = c(adj.r.squared, AIC),
+    label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")
   ) %>%
-  select(Variável = term, Coeficiente = estimate, `IC 2.5%` = conf.low, `IC 97.5%` = conf.high, `p-valor` = p.value, `Significativo (<0.05)` = signif)
+  as_gt() %>%
+  tab_header(
+    title = "Modelo Completo: Fatores Associados à Qualidade de Vida",
+    subtitle = "Variável dependente: PEDSQL Global (pedsqlglobal36)"
+  ) %>%
+  tab_source_note(md("**Nota:** Coeficientes representam a mudança no escore PEDSQL Global. Valores em negrito indicam significância estatística (p < 0.05)."))
 ```
 
-## Modelagem Hierárquica (Stepwise Forçado por Blocos)
+#### Visualização do Modelo: Forest Plot
 
-A seguir, ajustamos modelos em etapas, adicionando os blocos de variáveis conforme o contexto:
-- **Bloco 1:** Saúde
-- **Bloco 2:** Saúde + Contexto Social
-- **Bloco 3:** Saúde + Contexto Social + Desenvolvimento
+Para facilitar a interpretação dos resultados do modelo, podemos usar um **Forest Plot**. Este gráfico mostra o efeito de cada variável de forma visual, sendo uma alternativa poderosa à tabela de regressão.
+
+**Como interpretar o Forest Plot:**
+
+-   **Eixo Vertical:** Lista todas as variáveis (e suas categorias) incluídas no modelo.
+-   **Eixo Horizontal:** Representa a escala dos coeficientes. O valor zero, marcado por uma linha pontilhada vertical, é a nossa referência de "nenhum efeito".
+-   **Pontos:** Cada ponto representa a estimativa do coeficiente para aquela variável — ou seja, o quanto o escore de qualidade de vida muda, em média, para aquela categoria, mantendo as outras variáveis constantes.
+-   **Linhas Horizontais:** As linhas que passam por cada ponto são os **intervalos de confiança de 95%**. Elas nos dão uma ideia da incerteza em torno da nossa estimativa.
+
+**Regra prática:** Se a linha horizontal de uma variável **cruza a linha do zero**, o efeito daquela variável não é considerado estatisticamente significativo (equivalente a um p-valor > 0.05). Se a linha está inteiramente à direita ou à esquerda do zero, o efeito é significativo.
 
 ```{r}
-# Função para ajustar modelo e apresentar resultados
-ajustar_modelo <- function(vars) {
-  if(length(vars) == 0) return(NULL)
-  dados <- data %>% select(pedsqlglobal36, all_of(vars)) %>% na.omit()
-  if(nrow(dados) < 10) return(NULL)
-  mod <- lm(pedsqlglobal36 ~ ., data = dados)
-  broom::tidy(mod, conf.int = TRUE) %>%
-    filter(term != "(Intercept)") %>%
-    mutate(
-      p.value = format.pval(p.value, digits = 2, eps = 0.001),
-      signif = ifelse(as.numeric(p.value) < 0.05, "*", "")
-    ) %>%
-    select(Variável = term, Coeficiente = estimate, `IC 2.5%` = conf.low, `IC 97.5%` = conf.high, `p-valor` = p.value, `Significativo (<0.05)` = signif)
+#| label: forest-plot-completo
+#| fig-cap: "Forest Plot dos coeficientes do Modelo Completo"
+#| fig-width: 7
+#| fig-height: 6
+
+# Preparar dados para o Forest Plot
+library(broom)
+library(stringr)
+
+coef_df <- broom::tidy(modelo_completo, conf.int = TRUE) %>%
+  dplyr::filter(term != "(Intercept)")
+
+# Criar o gráfico
+ggplot(coef_df, aes(x = estimate, y = reorder(term, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.25, colour = "grey30", linewidth = 0.8) +
+  geom_point(size = 2.5, colour = "black") +
+  theme_minimal(base_size = 11) +
+  labs(
+    title = "Efeito das Variáveis na Qualidade de Vida",
+    subtitle = "Coeficientes do modelo e intervalos de confiança de 95%",
+    x = "Beta",
+    y = NULL
+  ) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10)
+  )
+```
+
+### Modelo 2: Modelo com Seleção Stepwise (Exploratório)
+
+Diferente da abordagem anterior, onde partimos de variáveis pré-selecionadas, agora vamos adotar uma estratégia puramente exploratória. O método **Stepwise** construirá um modelo do zero, tendo a liberdade de testar **todas as variáveis disponíveis no conjunto de dados original**.
+
+O método funciona passo a passo, adicionando ou removendo variáveis com base no critério AIC (*Akaike Information Criterion*), que busca o melhor equilíbrio entre o ajuste do modelo aos dados e sua simplicidade (número de variáveis). O resultado é um modelo otimizado estatisticamente, que pode revelar associações inesperadas, mas que deve ser interpretado com cautela, pois não parte de hipóteses teóricas.
+
+```{r}
+#| label: modelo-stepwise
+#| tbl-cap: "Modelo de Regressão com Seleção Stepwise (AIC) a partir de todas as variáveis"
+
+# 1. Definir a fórmula inicial com TODAS as variáveis preditoras do dataset
+all_vars <- names(data)
+# Excluir as variáveis resposta e outras que não devem ser preditoras,
+# conforme solicitado (TANU, RESULTADOTANU e a duplicata da Bayley)
+vars_to_exclude <- c(
+  "pedsqlglobal36", "pedsqlfisico36", "pedsqlpsico36", # Respostas
+  "tanu", "resultadotanu",                            # TANU (processo)
+  "classcogbal36"                                     # Manter apenas Bayley Composto
+) 
+all_predictors <- setdiff(all_vars, vars_to_exclude)
+formula_todas <- as.formula(paste("pedsqlglobal36 ~", paste(all_predictors, collapse = " + ")))
+
+# 2. Criar um dataset "limpo", sem dados faltantes, para o Stepwise
+vars_para_step <- all.vars(formula_todas)
+data_completo_para_step <- data[complete.cases(data[, vars_para_step]), ]
+
+# 3. Verificação de Segurança: Remover preditores com apenas um nível no dataset limpo
+# A filtragem por `complete.cases()` pode deixar variáveis sem variação (apenas um nível),
+# o que causa erro no `lm()`. O código abaixo identifica e remove essas variáveis.
+predictors_no_dataset_limpo <- all_predictors
+vars_com_um_nivel <- sapply(data_completo_para_step[predictors_no_dataset_limpo], function(x) length(unique(x)) < 2)
+vars_a_remover <- names(vars_com_um_nivel[vars_com_um_nivel == TRUE])
+
+if (length(vars_a_remover) > 0) {
+  # Adiciona uma mensagem no output para informar quais variáveis foram removidas
+  cat("As seguintes variáveis foram removidas por terem apenas um nível após a remoção de NAs:", paste(vars_a_remover, collapse = ", "), "\n\n")
+  # Atualiza a lista de preditores e a fórmula
+  all_predictors_safe <- setdiff(all_predictors, vars_a_remover)
+  formula_todas <- as.formula(paste("pedsqlglobal36 ~", paste(all_predictors_safe, collapse = " + ")))
 }
 
-# Bloco 1: Saúde
-ajustar_modelo(bloco_saude)
+# 4. Ajustar um modelo de referência neste dataset "limpo" com a fórmula segura
+modelo_base_para_step <- lm(formula_todas, data = data_completo_para_step)
 
-# Bloco 2: Saúde + Social
-ajustar_modelo(c(bloco_saude, bloco_social))
+# 5. Usar o método stepwise para selecionar as melhores variáveis
+modelo_stepwise <- step(modelo_base_para_step, direction = "both", trace = 0)
 
-# Bloco 3: Saúde + Social + Desenvolvimento
-ajustar_modelo(c(bloco_saude, bloco_social, bloco_desenvolvimento))
+# Imprimir a fórmula do modelo final
+cat("Fórmula do modelo final selecionado pelo Stepwise:\n")
+print(formula(modelo_stepwise))
+cat("\n")
+
+# Criar a tabela de regressão para o modelo stepwise final
+tbl_modelo_stepwise <- tbl_regression(
+  modelo_stepwise,
+  exponentiate = FALSE,
+  pvalue_fun = ~style_pvalue(.x, digits = 3),
+  intercept = TRUE
+)
+
+# Apresentar o modelo em formato de tabela
+tbl_modelo_stepwise %>%
+  bold_p(t = 0.05) %>%
+  add_glance_table(
+    include = c(adj.r.squared, AIC),
+    label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")
+  ) %>%
+  as_gt() %>%
+  tab_header(
+    title = "Modelo Stepwise: Fatores Associados à Qualidade de Vida",
+    subtitle = "Variáveis selecionadas automaticamente (AIC) a partir de todo o dataset"
+  )
 ```
 
-## Interpretação dos Resultados
+#### Visualização do Modelo Stepwise: Forest Plot
 
-- **Coeficiente:** Indica o quanto a variável está associada à qualidade de vida, ajustando para as demais.
-- **IC 95%:** Intervalo de confiança para o coeficiente.
-- **p-valor:** Indica se a associação é estatisticamente significativa (p < 0.05).
-- **Significativo (<0.05):** Variáveis marcadas com * são estatisticamente significativas.
+Assim como fizemos para o modelo completo, vamos visualizar os resultados do modelo stepwise para facilitar a interpretação.
 
-**Importante:**
-- Os modelos hierárquicos mostram como a inclusão de novos blocos de variáveis pode alterar a significância das associações.
-- A interpretação deve ser feita considerando o contexto clínico e social, não apenas o p-valor.
+```{r}
+#| label: forest-plot-stepwise
+#| fig-cap: "Forest Plot dos coeficientes do Modelo Stepwise"
+#| fig-width: 7
+#| fig-height: 5
 
-Se desejar, podemos detalhar a interpretação de cada modelo ou apresentar gráficos dos coeficientes.
+# Preparar dados para o Forest Plot
+coef_df_stepwise <- broom::tidy(modelo_stepwise, conf.int = TRUE) %>%
+  dplyr::filter(term != "(Intercept)")
+
+# Criar o gráfico
+ggplot(coef_df_stepwise, aes(x = estimate, y = reorder(term, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.25, colour = "grey30", linewidth = 0.8) +
+  geom_point(size = 2.5, colour = "black") +
+  theme_minimal(base_size = 11) +
+  labs(
+    title = "Efeito das Variáveis Selecionadas (Stepwise) na Qualidade de Vida",
+    subtitle = "Coeficientes do modelo e intervalos de confiança de 95%",
+    x = "Beta",
+    y = NULL
+  ) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10)
+  )
+```
+
+Com os resultados dos modelos completo e stepwise em mãos, o próximo passo da nossa estratégia será construir o modelo hierárquico. Isso nos permitirá comparar as três abordagens e escolher a mais adequada.
+
+### Modelo 3: Modelo com Seleção Stepwise (A partir das Variáveis Pré-Selecionadas)
+
+Finalmente, vamos criar um terceiro modelo para comparação. Este modelo também usará a seleção **Stepwise**, mas em vez de começar com todas as variáveis do dataset, ele partirá do nosso `modelo_completo` original — aquele que contém apenas as variáveis que pré-selecionamos com base na análise univariada (p-mediana < 0.25 ou N/A).
+
+O objetivo aqui é refinar nossa seleção inicial, permitindo que o algoritmo remova variáveis que, embora promissoras na análise univariada, podem não ser significativas quando consideradas em conjunto com as outras.
+
+```{r}
+#| label: modelo-stepwise-refinado
+#| tbl-cap: "Modelo de Regressão com Seleção Stepwise (a partir das variáveis pré-selecionadas)"
+
+# Reutilizar o mesmo data.frame limpo que criamos para o primeiro stepwise exploratório,
+# pois ele garante que não haverá NAs para nenhuma variável.
+# O importante é que a fórmula usada no lm() seja a do modelo_completo.
+modelo_base_refinado <- lm(formula(modelo_completo), data = data_completo_para_step)
+
+# Usar o método stepwise para selecionar as melhores variáveis a partir do modelo completo
+modelo_stepwise_refinado <- step(modelo_base_refinado, direction = "both", trace = 0)
+
+# Imprimir a fórmula do modelo final
+cat("Fórmula do modelo final selecionado pelo Stepwise (Refinado):\n")
+print(formula(modelo_stepwise_refinado))
+cat("\n")
+
+# Criar a tabela de regressão para o modelo stepwise refinado
+tbl_modelo_stepwise_refinado <- tbl_regression(
+  modelo_stepwise_refinado,
+  exponentiate = FALSE,
+  pvalue_fun = ~style_pvalue(.x, digits = 3),
+  intercept = TRUE
+)
+
+# Apresentar o modelo em formato de tabela
+tbl_modelo_stepwise_refinado %>%
+  bold_p(t = 0.05) %>%
+  add_glance_table(
+    include = c(adj.r.squared, AIC),
+    label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")
+  ) %>%
+  as_gt() %>%
+  tab_header(
+    title = "Modelo Stepwise Refinado: Fatores Associados à Qualidade de Vida",
+    subtitle = "Variáveis selecionadas (AIC) a partir do grupo pré-selecionado"
+  )
+```
+
+#### Visualização do Modelo Stepwise Refinado: Forest Plot
+
+```{r}
+#| label: forest-plot-stepwise-refinado
+#| fig-cap: "Forest Plot dos coeficientes do Modelo Stepwise Refinado"
+#| fig-width: 7
+#| fig-height: 5
+
+# Preparar dados para o Forest Plot
+coef_df_stepwise_refinado <- broom::tidy(modelo_stepwise_refinado, conf.int = TRUE) %>%
+  dplyr::filter(term != "(Intercept)")
+
+# Criar o gráfico
+ggplot(coef_df_stepwise_refinado, aes(x = estimate, y = reorder(term, estimate))) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.25, colour = "grey30", linewidth = 0.8) +
+  geom_point(size = 2.5, colour = "black") +
+  theme_minimal(base_size = 11) +
+  labs(
+    title = "Efeito das Variáveis Selecionadas (Stepwise Refinado) na Qualidade de Vida",
+    subtitle = "Coeficientes do modelo e intervalos de confiança de 95%",
+    x = "Beta",
+    y = NULL
+  ) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 10)
+  )
+```
+
+### Modelo 4: Modelo Hierárquico Sequencial
+
+Conforme a estratégia definida com a orientadora, construiremos o modelo final de forma sequencial e teórica. A ideia é adicionar blocos de variáveis em uma ordem lógica. Uma variável que se mostrar significativa (p < 0.10) em qualquer etapa será acumulada e mantida em todos os passos subsequentes.
+
+Os blocos são definidos da seguinte forma:
+-   **Bloco 1 (Saúde Perinatal):**
+
+     -   `partocat` (Via de Parto)
+     -   `lme6` (Aleitamento Exclusivo aos 6m)
+
+-   **Bloco 2 (Contexto Social):**
+
+     -   `estadocivilmae24` (Estado Civil da Mãe)
+     -   `escolamaecat36` (Escolaridade da Mãe)
+     -   `abepcat36` (Classe Social ABEP)
+     -   `creche36` (Frequenta Creche)
+
+-   **Bloco 3 (Hábitos de Tela):**
+
+     -   `tempotelacat36` (Tempo de Tela)
+     -   `horacertacat36` (Horário Fixo para Telas)
+     -   `telacasa36` (Como Usa Telas)
+     -   `telalimitetempocat36` (Limite de Tempo de Tela)
+     -   `telalimiteconteudocat36` (Limite de Conteúdo da Tela)
+
+-   **Bloco 4 (Desenvolvimento):**
+
+     -   `classcogcomp36` (Bayley: Cognitivo Composto)
+     -   `classmfbal36` (Bayley: Motor Fino)
+     -   `classmgbal36` (Bayley: Motor Grosso)
+
+A variável `genero` será incluída como controle em todas as etapas.
+
+---
+
+#### Passo 1: Gênero + Bloco de Saúde Perinatal
+
+Começamos com o modelo mais básico, incluindo apenas o gênero e os fatores perinatais.
+
+```{r}
+#| label: modelo-h1
+#| tbl-cap: "Modelo Hierárquico - Passo 1: Saúde Perinatal"
+
+# Função para extrair variáveis significativas (p < 0.10) de um modelo
+extrair_significativas_hierarquia <- function(modelo) {
+  tidy(modelo) %>%
+    filter(p.value < 0.10 & term != "(Intercept)") %>%
+    # Extrai o nome base da variável (ex: 'partocat' de 'partocat1')
+    mutate(term_base = str_extract(term, "^[^0-9]+")) %>%
+    pull(term_base) %>%
+    unique()
+}
+
+# Definir controle e blocos com variáveis candidatas
+controle <- "genero"
+bloco1_vars <- intersect(c("partocat", "lme6"), vars_candidatas)
+bloco2_vars <- intersect(c("estadocivilmae24", "creche36", "escolamaecat36", "abepcat36"), vars_candidatas)
+bloco3_vars <- intersect(c("tempotelacat36", "horacertacat36", "telacasa36", "telalimitetempocat36", "telalimiteconteudocat36"), vars_candidatas)
+bloco4_vars <- intersect(c("classcogcomp36", "classmfbal36", "classmgbal36"), vars_candidatas)
+
+# Modelo 1
+formula_h1 <- as.formula(paste("pedsqlglobal36 ~", paste(c(controle, bloco1_vars), collapse = " + ")))
+modelo_h1 <- lm(formula_h1, data = data)
+vars_acumuladas_h1 <- extrair_significativas_hierarquia(modelo_h1)
+
+# Apresentar tabela
+tbl_regression(modelo_h1, intercept = TRUE) %>%
+  bold_p(t = 0.10) %>%
+  add_glance_table(include = c(adj.r.squared, AIC), label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")) %>%
+  as_gt() %>%
+  tab_header(title = "Passo 1: Gênero + Saúde Perinatal")
+```
+No primeiro passo, a variável `partocat` (Via de Parto) mostrou-se significativa (p=0.012). Conforme nossa regra, ela será mantida em todas as etapas subsequentes do modelo.
+
+---
+
+#### Passo 2: Adição do Bloco de Contexto Social
+
+Agora, adicionamos as variáveis do contexto social, mantendo a variável significativa da etapa anterior.
+
+```{r}
+#| label: modelo-h2
+#| tbl-cap: "Modelo Hierárquico - Passo 2: Contexto Social"
+
+# Modelo 2
+vars_para_h2 <- unique(c(controle, vars_acumuladas_h1, bloco2_vars))
+formula_h2 <- as.formula(paste("pedsqlglobal36 ~", paste(vars_para_h2, collapse = " + ")))
+modelo_h2 <- lm(formula_h2, data = data)
+vars_sig_h2 <- extrair_significativas_hierarquia(modelo_h2)
+vars_acumuladas_h2 <- unique(c(vars_acumuladas_h1, vars_sig_h2))
+
+# Apresentar tabela
+tbl_regression(modelo_h2, intercept = TRUE) %>%
+  bold_p(t = 0.10) %>%
+  add_glance_table(include = c(adj.r.squared, AIC), label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")) %>%
+  as_gt() %>%
+  tab_header(title = "Passo 2: Gênero + Sig. (Passo 1) + Contexto Social")
+```
+Após adicionar o bloco social, `partocat` manteve sua significância (p=0.070). Nenhuma nova variável se mostrou significativa nesta etapa. Seguimos para o próximo bloco, mantendo `partocat` no modelo.
+
+---
+
+#### Passo 3: Adição do Bloco de Hábitos de Tela
+
+Continuamos o processo, agora incluindo as variáveis sobre hábitos de tela.
+
+```{r}
+#| label: modelo-h3
+#| tbl-cap: "Modelo Hierárquico - Passo 3: Hábitos de Tela"
+
+# Modelo 3
+vars_para_h3 <- unique(c(controle, vars_acumuladas_h2, bloco3_vars))
+formula_h3 <- as.formula(paste("pedsqlglobal36 ~", paste(vars_para_h3, collapse = " + ")))
+modelo_h3 <- lm(formula_h3, data = data)
+vars_sig_h3 <- extrair_significativas_hierarquia(modelo_h3)
+# Forçando a manutenção de 'telalimitetempocat36' por interesse teórico, conforme solicitado.
+vars_acumuladas_h3 <- unique(c(vars_acumuladas_h2, vars_sig_h3, "telalimitetempocat36"))
+
+# Apresentar tabela
+tbl_regression(modelo_h3, intercept = TRUE) %>%
+  bold_p(t = 0.10) %>%
+  add_glance_table(include = c(adj.r.squared, AIC), label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")) %>%
+  as_gt() %>%
+  tab_header(title = "Passo 3: Gênero + Sig. (Passo 2) + Hábitos de Tela")
+```
+Nesta etapa, `partocat` manteve-se como uma variável de tendência (p=0.094). Nenhuma nova variável atingiu o limiar de significância de p < 0.10. No entanto, por interesse teórico e para explorar seu potencial impacto, a variável `telalimitetempocat36` também será mantida e levada para a etapa final, juntamente com `partocat`.
+
+---
+
+#### Passo 4: Adição do Bloco de Desenvolvimento (Modelo Final)
+
+Finalmente, adicionamos as variáveis de desenvolvimento, mantendo `partocat` e `telalimitetempocat36` no modelo, para chegarmos ao nosso modelo hierárquico final.
+
+```{r}
+#| label: modelo-hierarquico-final
+#| tbl-cap: "Modelo Hierárquico Final"
+
+# Modelo 4 (Final)
+vars_para_h4 <- unique(c(controle, vars_acumuladas_h3, bloco4_vars))
+formula_h4 <- as.formula(paste("pedsqlglobal36 ~", paste(vars_para_h4, collapse = " + ")))
+modelo_hierarquico_final <- lm(formula_h4, data = data)
+
+# Apresentar tabela
+tbl_regression(modelo_hierarquico_final, intercept = TRUE) %>%
+  bold_p(t = 0.10) %>%
+  add_glance_table(include = c(adj.r.squared, AIC), label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")) %>%
+  as_gt() %>%
+  tab_header(title = "Modelo Hierárquico Final", subtitle = "Resultado após a adição sequencial de todos os blocos")
+```
+No modelo final, após a inclusão de todos os blocos, as variáveis `partocat` (p=0.053) e `telalimitetempocat36` (p=0.051) mantiveram-se como as únicas significativas no limiar de p < 0.10. Com base nisso, construiremos nosso modelo final refinado apenas com estas variáveis.
+
+#### Modelo Hierárquico Final (Refinado)
+
+O modelo abaixo contém apenas as variáveis (`genero`, `partocat` e `telalimitetempocat36`) que se mostraram robustas ao final do processo de seleção hierárquica.
+
+```{r}
+#| label: modelo-hierarquico-refinado
+#| tbl-cap: "Modelo Hierárquico Final (Refinado)"
+
+# Modelo Final Refinado
+vars_refinadas <- c("genero", "partocat", "telalimitetempocat36")
+formula_refinada <- as.formula(paste("pedsqlglobal36 ~", paste(vars_refinadas, collapse = " + ")))
+modelo_hierarquico_refinado <- lm(formula_refinada, data = data)
+
+# Apresentar tabela
+tbl_regression(modelo_hierarquico_refinado, intercept = TRUE) %>%
+  bold_p(t = 0.10) %>%
+  add_glance_table(include = c(adj.r.squared, AIC), label = list(adj.r.squared ~ "R² Ajustado", AIC ~ "AIC")) %>%
+  as_gt() %>%
+  tab_header(title = "Modelo Hierárquico Final (Refinado)")
+```
+
+### Fase Final: Comparação e Seleção do Modelo
+
+Chegamos à etapa decisiva: comparar os modelos que construímos e selecionar o que melhor responde à nossa pergunta de pesquisa.
+
+Construímos os seguintes modelos:
+1.  **Modelo Completo:** Incluiu todas as variáveis com p-mediana < 0.25 na análise univariada.
+2.  **Modelo Stepwise (Exploratório):** Construído automaticamente a partir de todas as variáveis do dataset.
+3.  **Modelo Stepwise (Refinado):** Construído automaticamente, mas partindo apenas das variáveis pré-selecionadas no Modelo 1.
+4.  **Modelo Hierárquico Sequencial:** O nosso modelo mais teórico, construído passo a passo por blocos, acumulando variáveis com p<0.10.
+5.  **Modelo Hierárquico (Refinado):** Construído apenas com as variáveis que se mostraram significativas no final do processo de seleção hierárquica.
+
+A tabela abaixo resume o desempenho de cada um.
+
+-   **R² Ajustado:** Indica a proporção da variabilidade da qualidade de vida que o modelo consegue explicar, ajustado pelo número de variáveis. Quanto maior, melhor.
+-   **AIC/BIC:** São critérios de informação que penalizam a complexidade do modelo. Quanto menores, melhor.
+
+```{r}
+#| label: comparacao-modelos
+#| tbl-cap: "Comparação das Métricas de Ajuste entre os Modelos de Regressão"
+
+# Extrair métricas de cada modelo
+glance_completo <- broom::glance(modelo_completo) %>% select(adj.r.squared, AIC, BIC, nobs) %>% mutate(Modelo = "Completo (Pré-selecionado)")
+glance_step_exp <- broom::glance(modelo_stepwise) %>% select(adj.r.squared, AIC, BIC, nobs) %>% mutate(Modelo = "Stepwise (Exploratório)")
+glance_step_ref <- broom::glance(modelo_stepwise_refinado) %>% select(adj.r.squared, AIC, BIC, nobs) %>% mutate(Modelo = "Stepwise (Refinado)")
+glance_hierarquico <- broom::glance(modelo_hierarquico_refinado) %>% select(adj.r.squared, AIC, BIC, nobs) %>% mutate(Modelo = "Hierárquico (Refinado)")
+
+# Combinar em uma única tabela
+bind_rows(glance_completo, glance_step_exp, glance_step_ref, glance_hierarquico) %>%
+  select(Modelo, `R² Ajustado` = adj.r.squared, AIC, BIC, `N` = nobs) %>%
+  gt() %>%
+  fmt_number(columns = c("R² Ajustado", "AIC", "BIC"), decimals = 3) %>%
+  tab_header(
+    title = "Comparativo de Desempenho dos Modelos Finais",
+    subtitle = "Métricas para avaliar o ajuste e a complexidade"
+  ) %>%
+  # Destacar o melhor modelo em cada métrica
+  # (melhor R² é o maior, melhores AIC/BIC são os menores)
+  tab_style(
+    style = cell_fill(color = "#d4edda"),
+    locations = cells_body(
+      columns = `R² Ajustado`,
+      rows = `R² Ajustado` == max(`R² Ajustado`)
+    )
+  ) %>%
+    tab_style(
+    style = cell_fill(color = "#d4edda"),
+    locations = cells_body(
+      columns = AIC,
+      rows = AIC == min(AIC)
+    )
+  ) %>%
+    tab_style(
+    style = cell_fill(color = "#d4edda"),
+    locations = cells_body(
+      columns = BIC,
+      rows = BIC == min(BIC)
+    )
+  )
+```
+
+#### Discussão e Escolha do Modelo Final
+
+Ao analisar a tabela de comparação, observamos que o **Modelo Stepwise (Exploratório)** e o **Stepwise (Refinado)** apresentam os melhores indicadores estatísticos, com o maior R² Ajustado e os menores valores de AIC e BIC. Isso sugere que, do ponto de vista puramente preditivo, esses modelos são superiores.
+
+No entanto, o **Modelo Hierárquico Sequencial**, embora com um poder de explicação um pouco menor (R² ajustado de 0.057 vs 0.129 do Stepwise Refinado), tem a grande vantagem de ter sido construído com base em uma lógica teórica clara, conforme sugerido pela orientadora. Ele mostra como as associações mudam à medida que o modelo é ajustado por novos fatores, o que enriquece a discussão.
+
+**Recomendação:**
+Para o objetivo final do trabalho, que é entender os fatores associados à qualidade de vida de uma forma interpretável, tanto o **Modelo Stepwise (Refinado)** quanto o **Modelo Hierárquico** são fortes candidatos. A escolha entre eles depende do peso que se quer dar à otimização estatística versus à fundamentação teórica.
+
+A seguir, faremos a análise de resíduos de ambos para garantir que seus pressupostos são válidos.
+
+# Análise de Resíduos
+
+Para garantir a validade de nossos modelos de regressão, é essencial verificar se os pressupostos do modelo linear foram atendidos. Faremos isso analisando os resíduos dos nossos dois melhores candidatos: o `modelo_stepwise_refinado` (melhor estatisticamente) e o `modelo_hierarquico_refinado` (melhor teoricamente).
+
+Os pressupostos são:
+
+1. **Linearidade:** A relação entre os preditores e a variável resposta é linear.
+2. **Homocedasticidade:** A variância dos erros (resíduos) é constante.
+3. **Normalidade dos Resíduos:** Os erros seguem uma distribuição normal.
+4. **Independência dos Erros:** Os erros não são correlacionados entre si.
+
+## Diagnóstico do Modelo Stepwise Refinado
+
+```{r}
+#| label: residuos-stepwise-refinado
+#| fig-cap: "Gráficos de diagnóstico para o Modelo Stepwise Refinado"
+#| fig-width: 10
+#| fig-height: 8
+
+# Definir layout para 2x2 gráficos
+par(mfrow = c(2, 2))
+# Gerar os gráficos de diagnóstico
+plot(modelo_stepwise_refinado)
+# Resetar layout
+par(mfrow = c(1, 1))
+```
+
+**Interpretação dos Gráficos:**
+-   **Residuals vs Fitted:** A linha vermelha está razoavelmente próxima da linha horizontal em zero, sem um padrão curvo óbvio, o que sugere que o pressuposto de **linearidade** é atendido. A dispersão dos pontos parece relativamente constante, indicando **homocedasticidade**.
+-   **Normal Q-Q:** Os pontos se desviam consideravelmente da linha diagonal, especialmente nas caudas. Isso indica que os resíduos **não seguem uma distribuição normal**, violando este pressuposto.
+-   **Scale-Location:** A linha vermelha está quase horizontal, confirmando a **homocedasticidade** (variância constante dos resíduos).
+-   **Residuals vs Leverage:** Não há pontos no canto superior ou inferior direito, fora da distância de Cook (linhas pontilhadas), o que significa que não há **pontos de alavancagem excessiva ou outliers influentes** que possam distorcer o modelo.
+
+**Conclusão:** O Modelo Stepwise Refinado atende aos pressupostos de linearidade e homocedasticidade, mas **falha no pressuposto de normalidade dos resíduos**.
+
+### Teste de Normalidade dos Resíduos (Shapiro-Wilk)
+```{r}
+#| label: shapiro-stepwise
+#| tbl-cap: "Teste de Normalidade de Shapiro-Wilk para o Modelo Stepwise Refinado"
+residuos_stepwise <- residuals(modelo_stepwise_refinado)
+teste_shapiro_stepwise <- shapiro.test(residuos_stepwise)
+broom::tidy(teste_shapiro_stepwise) %>% 
+  gt() %>% 
+  fmt_number(columns = where(is.numeric), decimals = 4) %>%
+  cols_label(statistic = "W", p.value = "p-valor", method = "Método")
+```
+
+O teste de Shapiro-Wilk para os resíduos do modelo apresentou um p-valor de `r format.pval(teste_shapiro_stepwise$p.value, digits=3, eps = 0.001)`. Como este valor é menor que 0.05, **rejeitamos a hipótese nula**, o que reforça a conclusão da análise gráfica de que os resíduos **não seguem uma distribuição normal**.
+
+## Diagnóstico do Modelo Hierárquico Final
+
+```{r}
+#| label: residuos-hierarquico
+#| fig-cap: "Gráficos de diagnóstico para o Modelo Hierárquico Final"
+#| fig-width: 10
+#| fig-height: 8
+
+# Definir layout para 2x2 gráficos
+par(mfrow = c(2, 2))
+# Gerar os gráficos de diagnóstico
+plot(modelo_hierarquico_refinado)
+# Resetar layout
+par(mfrow = c(1, 1))
+```
+
+**Interpretação dos Gráficos:**
+-   **Residuals vs Fitted:** Similar ao modelo anterior, a linha vermelha está próxima de zero e os pontos estão dispersos sem um padrão claro, apoiando os pressupostos de **linearidade** e **homocedasticidade**.
+-   **Normal Q-Q:** Os pontos se desviam da linha tracejada, principalmente nas caudas, o que indica que os resíduos **não são normalmente distribuídos**.
+-   **Scale-Location:** A linha vermelha é quase horizontal, reforçando a conclusão de **homocedasticidade**.
+-   **Residuals vs Leverage:** Não observamos pontos problemáticos que estejam exercendo uma influência indevida sobre os resultados do modelo.
+
+**Conclusão:** O Modelo Hierárquico Final também atende aos pressupostos de linearidade e homocedasticidade, mas **viola o de normalidade dos resíduos**.
+
+### Teste de Normalidade dos Resíduos (Shapiro-Wilk)
+```{r}
+#| label: shapiro-hierarquico
+#| tbl-cap: "Teste de Normalidade de Shapiro-Wilk para o Modelo Hierárquico (Refinado)"
+residuos_hierarquico <- residuals(modelo_hierarquico_refinado)
+teste_shapiro_hierarquico <- shapiro.test(residuos_hierarquico)
+broom::tidy(teste_shapiro_hierarquico) %>% 
+  gt() %>% 
+  fmt_number(columns = where(is.numeric), decimals = 4) %>%
+  cols_label(statistic = "W", p.value = "p-valor", method = "Método")
+```
+
+O teste de Shapiro-Wilk para os resíduos deste modelo apresentou um p-valor de `r format.pval(teste_shapiro_hierarquico$p.value, digits=3, eps=0.001)`. Sendo este valor menor que 0.05, há evidências para **rejeitar a hipótese de normalidade dos resíduos**, o que está em concordância com a análise visual do gráfico Q-Q.
+
+# Modelagem Avançada: Regressão Beta
+
+## Por que um novo modelo?
+
+Nossa análise de resíduos anterior revelou um problema fundamental: os modelos de regressão linear, embora úteis para uma exploração inicial, não são adequados para a nossa variável resposta, a `pedsqlglobal36`. A violação do pressuposto de normalidade dos resíduos (confirmada visualmente e pelo teste de Shapiro-Wilk) não é um acaso, mas uma consequência direta da natureza dos dados de qualidade de vida, que são limitados (entre 0 e 100) e geralmente assimétricos.
+
+Para resolver isso, adotaremos uma abordagem mais sofisticada e teoricamente correta: a **Regressão Beta**. Conforme recomendado na literatura especializada (por exemplo, [Hunger et al., 2011](https://doi.org/10.1016/j.jval.2010.12.009); [Kharroubi, 2020](https://doi.org/10.3390/healthcare8040525)), a Regressão Beta é um tipo de Modelo Linear Generalizado (GLM) projetado especificamente para variáveis contínuas que representam taxas ou proporções, como o nosso escore.
+
+Em vez de assumir uma distribuição normal, este modelo assume que a variável resposta segue uma **distribuição Beta**, que naturalmente acomoda a assimetria e os limites dos dados.
+
+## Implementação da Regressão Beta
+
+### Passo 1: Preparação da Variável Resposta
+
+A Regressão Beta exige que a variável resposta esteja no intervalo aberto (0, 1). Portanto, precisamos primeiro verificar os valores mínimo e máximo do nosso escore e, em seguida, transformá-lo.
+
+```{r}
+#| label: verificar-limites-pedsql
+#| tbl-cap: "Verificação dos limites do escore PEDSQL Global"
+summary(data$pedsqlglobal36)
+```
+
+O sumário acima nos mostra o intervalo de valores. Como a Regressão Beta não aceita os valores exatos 0 ou 1, aplicaremos uma transformação padrão para garantir que todos os dados estejam dentro do intervalo aberto (0, 1).
+
+```{r}
+#| label: transformar-pedsql-beta
+# Transformação para o intervalo (0,1)
+# A fórmula (y * (n - 1) + 0.5) / n é robusta para casos que contenham 0s e 1s.
+n <- sum(!is.na(data$pedsqlglobal36))
+data <- data %>%
+  mutate(pedsqlglobal36_beta = if_else(is.na(pedsqlglobal36), NA_real_,
+    (pedsqlglobal36/100 * (n - 1) + 0.5) / n)
+  )
+
+# Verificar o resultado da transformação
+summary(data$pedsqlglobal36_beta)
+```
+
+### Passo 2: Ajuste do Modelo
+
+Agora, vamos ajustar o modelo de Regressão Beta. Para uma comparação justa, usaremos o mesmo conjunto de variáveis que foi selecionado pelo nosso melhor modelo anterior, o `modelo_stepwise_refinado`.
+
+```{r}
+#| label: modelo-beta
+#| tbl-cap: "Modelo de Regressão Beta para o Escore PEDSQL Global"
+
+# Obter a fórmula do modelo stepwise refinado
+formula_stepwise_refinado <- formula(modelo_stepwise_refinado)
+
+# Substituir a variável resposta na fórmula
+formula_beta <- update.formula(formula_stepwise_refinado, pedsqlglobal36_beta ~ .)
+cat("Fórmula do modelo Beta:\n")
+print(formula_beta)
+cat("\n")
+
+# Ajustar o modelo de regressão beta
+modelo_beta <- betareg(formula_beta, data = data)
+
+# Apresentar o modelo em formato de tabela
+tbl_regression(
+  modelo_beta,
+  pvalue_fun = ~style_pvalue(.x, digits = 3),
+  intercept = TRUE
+) %>%
+  bold_p(t = 0.05) %>%
+  as_gt() %>%
+  tab_header(
+    title = "Regressão Beta: Fatores Associados à Qualidade de Vida",
+    subtitle = "Variável dependente: PEDSQL Global (transformado para o intervalo 0-1)"
+  ) %>%
+  tab_source_note(md("**Nota:** Coeficientes em escala logit. Um coeficiente positivo aumenta a média do escore, enquanto um negativo a diminui. O coeficiente (phi) é o parâmetro de precisão do modelo."))
+
+```
