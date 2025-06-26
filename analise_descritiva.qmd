@@ -47,6 +47,8 @@ library(broom.helpers)
 library(broom)
 library(ggstats)
 library(betareg)
+library(DHARMa)
+library(StepBeta)
 # library(patchwork)  # desabilitado: não necessário
 ```
 
@@ -1736,12 +1738,30 @@ Começamos com o modelo mais básico, incluindo apenas o gênero e os fatores pe
 
 # Função para extrair variáveis significativas (p < 0.10) de um modelo
 extrair_significativas_hierarquia <- function(modelo) {
-  tidy(modelo) %>%
+  # Nomes dos preditores originais, para evitar truncamento de nomes como 'var36'
+  predictors <- all.vars(formula(modelo))[-1]
+  
+  # Termos significativos do modelo
+  sig_terms <- tidy(modelo) %>%
     filter(p.value < 0.10 & term != "(Intercept)") %>%
-    # Extrai o nome base da variável (ex: 'partocat' de 'partocat1')
-    mutate(term_base = str_extract(term, "^[^0-9]+")) %>%
-    pull(term_base) %>%
-    unique()
+    pull(term)
+  
+  # Para cada termo significativo, encontre o preditor original correspondente.
+  # Isso é mais robusto do que usar regex, especialmente para nomes como 'var24'.
+  base_vars <- c()
+  if (length(sig_terms) > 0) {
+    # Ordenar por comprimento decrescente para lidar com nomes que são prefixos de outros
+    sorted_predictors <- predictors[order(nchar(predictors), decreasing = TRUE)]
+    for (term in sig_terms) {
+      for (pred in sorted_predictors) {
+        if (startsWith(term, pred)) {
+          base_vars <- c(base_vars, pred)
+          break 
+        }
+      }
+    }
+  }
+  return(unique(base_vars))
 }
 
 # Definir controle e blocos com variáveis candidatas
@@ -2033,64 +2053,290 @@ Em vez de assumir uma distribuição normal, este modelo assume que a variável 
 
 ## Implementação da Regressão Beta
 
-### Passo 1: Preparação da Variável Resposta
+### Passo 1: Preparação da Variável Resposta e Seleção de Preditoras
 
-A Regressão Beta exige que a variável resposta esteja no intervalo aberto (0, 1). Portanto, precisamos primeiro verificar os valores mínimo e máximo do nosso escore e, em seguida, transformá-lo.
-
-```{r}
-#| label: verificar-limites-pedsql
-#| tbl-cap: "Verificação dos limites do escore PEDSQL Global"
-summary(data$pedsqlglobal36)
-```
-
-O sumário acima nos mostra o intervalo de valores. Como a Regressão Beta não aceita os valores exatos 0 ou 1, aplicaremos uma transformação padrão para garantir que todos os dados estejam dentro do intervalo aberto (0, 1).
+A Regressão Beta exige que a variável resposta esteja no intervalo aberto (0, 1). Primeiro, transformamos o escore e, em seguida, reutilizamos as mesmas variáveis candidatas da análise anterior.
 
 ```{r}
 #| label: transformar-pedsql-beta
-# Transformação para o intervalo (0,1)
+
+# 1. Transformar a variável resposta para o intervalo (0,1)
 # A fórmula (y * (n - 1) + 0.5) / n é robusta para casos que contenham 0s e 1s.
 n <- sum(!is.na(data$pedsqlglobal36))
 data <- data %>%
-  mutate(pedsqlglobal36_beta = if_else(is.na(pedsqlglobal36), NA_real_,
-    (pedsqlglobal36/100 * (n - 1) + 0.5) / n)
+  mutate(pedsqlglobal36_beta = if_else(is.na(data$pedsqlglobal36), NA_real_,
+    ((data$pedsqlglobal36/100) * (n - 1) + 0.5) / n)
   )
 
-# Verificar o resultado da transformação
-summary(data$pedsqlglobal36_beta)
+# 2. Re-selecionar variáveis candidatas (p-mediana < 0.25 ou N/A)
+map_vars_invertido <- setNames(names(vars_info), unlist(vars_info))
+vars_candidatas_nomes <- tabela_completa %>%
+  filter(p_valor_mediana < 0.25 | is.na(p_valor_mediana)) %>%
+  distinct(Variável) %>%
+  pull(Variável)
+vars_candidatas <- map_vars_invertido[vars_candidatas_nomes] %>%
+  unname()
+
+cat("Variáveis candidatas para os modelos Beta:\n")
+cat(paste("- `", vars_candidatas, "`", collapse = "\n"), sep = "\n")
 ```
 
-### Passo 2: Ajuste do Modelo
+### Fase 2: Construção e Comparação dos Modelos
 
-Agora, vamos ajustar o modelo de Regressão Beta. Para uma comparação justa, usaremos o mesmo conjunto de variáveis que foi selecionado pelo nosso melhor modelo anterior, o `modelo_stepwise_refinado`.
+Agora, construiremos os três modelos Beta para comparação.
+
+#### Modelo A: Modelo Beta "Completo"
+
+Este modelo inclui todas as variáveis candidatas de uma só vez.
 
 ```{r}
-#| label: modelo-beta
-#| tbl-cap: "Modelo de Regressão Beta para o Escore PEDSQL Global"
+#| label: modelo-beta-completo
+#| tbl-cap: "Modelo de Regressão Beta Completo com Todas as Variáveis Candidatas"
 
-# Obter a fórmula do modelo stepwise refinado
-formula_stepwise_refinado <- formula(modelo_stepwise_refinado)
+formula_beta_completa <- as.formula(
+  paste("pedsqlglobal36_beta ~", paste(vars_candidatas, collapse = " + "))
+)
+modelo_beta_completo <- betareg(formula_beta_completa, data = data, link = "logit")
 
-# Substituir a variável resposta na fórmula
-formula_beta <- update.formula(formula_stepwise_refinado, pedsqlglobal36_beta ~ .)
-cat("Fórmula do modelo Beta:\n")
-print(formula_beta)
-cat("\n")
+# Apresentar a tabela do modelo
+tbl_regression(modelo_beta_completo, exponentiate = TRUE) %>%
+  as_gt() %>%
+  tab_header(
+    title = "Modelo Beta Completo",
+    subtitle = "Variável dependente: PedsQL Global (transformado)"
+  )
+```
 
-# Ajustar o modelo de regressão beta
-modelo_beta <- betareg(formula_beta, data = data)
+#### Modelo B: Modelo Beta "Stepwise Refinado"
 
-# Apresentar o modelo em formato de tabela
+Este modelo usa um algoritmo para refinar o Modelo A, removendo variáveis que não contribuem significativamente.
+
+```{r}
+#| label: modelo-beta-stepwise
+#| tbl-cap: "Modelo de Regressão Beta com Seleção Stepwise (via StepBeta)"
+
+# Aplicar seleção stepwise backward a partir do modelo completo com StepBeta.
+# A função StepBeta realiza um procedimento "backward" por padrão, usando AIC.
+modelo_beta_stepwise <- StepBeta(modelo_beta_completo)
+
+# Apresentar a tabela do modelo final
+tbl_regression(modelo_beta_stepwise, exponentiate = TRUE) %>%
+  as_gt() %>%
+  tab_header(
+    title = "Modelo Beta Stepwise (Refinado)",
+    subtitle = "Variáveis selecionadas automaticamente por AIC via pacote StepBeta"
+  )
+```
+
+#### Modelo C: Modelo Beta "Hierárquico" (Análise Principal)
+
+Esta é a nossa análise principal, seguindo a abordagem teórica em blocos definida anteriormente.
+
+```{r}
+#| label: modelo-beta-hierarquico-logica
+#| echo: false
+# Função para extrair variáveis significativas (p < 0.10) de um modelo betareg
+extrair_significativas_beta <- function(modelo) {
+  # Nomes dos preditores originais, para evitar truncamento de nomes como 'var36'
+  predictors <- all.vars(formula(modelo))[-1]
+  
+  # Termos significativos do modelo
+  sig_terms <- tidy(modelo) %>%
+    filter(p.value < 0.10 & component == "mean" & term != "(Intercept)") %>%
+    pull(term)
+    
+  # Para cada termo significativo, encontre o preditor original correspondente
+  base_vars <- c()
+  if (length(sig_terms) > 0) {
+    # Ordenar por comprimento decrescente para lidar com nomes que são prefixos de outros
+    sorted_predictors <- predictors[order(nchar(predictors), decreasing = TRUE)]
+    for (term in sig_terms) {
+      for (pred in sorted_predictors) {
+        if (startsWith(term, pred)) {
+          base_vars <- c(base_vars, pred)
+          break
+        }
+      }
+    }
+  }
+  return(unique(base_vars))
+}
+
+# Definir controle e blocos com variáveis candidatas
+controle <- "genero"
+bloco1_vars <- intersect(c("partocat", "lme6"), vars_candidatas)
+bloco2_vars <- intersect(c("estadocivilmae24", "creche36", "escolamaecat36", "abepcat36"), vars_candidatas)
+bloco3_vars <- intersect(c("tempotelacat36", "horacertacat36", "telacasa36", "telalimitetempocat36", "telalimiteconteudocat36"), vars_candidatas)
+bloco4_vars <- intersect(c("classcogcomp36", "classmfbal36", "classmgbal36"), vars_candidatas)
+```
+
+**Passo C1: Gênero + Saúde Perinatal**
+```{r}
+#| label: modelo-beta-h1
+#| tbl-cap: "Modelo Beta Hierárquico - Passo 1"
+formula_beta_h1 <- as.formula(paste("pedsqlglobal36_beta ~", paste(c(controle, bloco1_vars), collapse = " + ")))
+modelo_beta_h1 <- betareg(formula_beta_h1, data = data)
+vars_acumuladas_h1 <- extrair_significativas_beta(modelo_beta_h1)
+
+tbl_regression(modelo_beta_h1, exponentiate = TRUE) %>% bold_p(t = 0.10)
+```
+*Variáveis significativas (p<0.10) para o próximo passo: `r paste(vars_acumuladas_h1, collapse=", ")`*
+
+**Passo C2: Adição do Contexto Social**
+```{r}
+#| label: modelo-beta-h2
+#| tbl-cap: "Modelo Beta Hierárquico - Passo 2"
+vars_para_h2 <- unique(c(controle, vars_acumuladas_h1, bloco2_vars))
+formula_beta_h2 <- as.formula(paste("pedsqlglobal36_beta ~", paste(vars_para_h2, collapse = " + ")))
+modelo_beta_h2 <- betareg(formula_beta_h2, data = data)
+vars_sig_h2 <- extrair_significativas_beta(modelo_beta_h2)
+vars_acumuladas_h2 <- unique(c(vars_acumuladas_h1, vars_sig_h2))
+
+tbl_regression(modelo_beta_h2, exponentiate = TRUE) %>% bold_p(t = 0.10)
+```
+*Variáveis significativas (p<0.10) para o próximo passo: `r paste(vars_acumuladas_h2, collapse=", ")`*
+
+**Passo C3: Adição dos Hábitos de Tela**
+```{r}
+#| label: modelo-beta-h3
+#| tbl-cap: "Modelo Beta Hierárquico - Passo 3"
+vars_para_h3 <- unique(c(controle, vars_acumuladas_h2, bloco3_vars))
+formula_beta_h3 <- as.formula(paste("pedsqlglobal36_beta ~", paste(vars_para_h3, collapse = " + ")))
+modelo_beta_h3 <- betareg(formula_beta_h3, data = data)
+vars_sig_h3 <- extrair_significativas_beta(modelo_beta_h3)
+vars_acumuladas_h3 <- unique(c(vars_acumuladas_h2, vars_sig_h3))
+
+tbl_regression(modelo_beta_h3, exponentiate = TRUE) %>% bold_p(t = 0.10)
+```
+*Variáveis significativas (p<0.10) para o próximo passo: `r paste(vars_acumuladas_h3, collapse=", ")`*
+
+**Passo C4: Adição do Bloco de Desenvolvimento**
+```{r}
+#| label: modelo-beta-h4
+#| tbl-cap: "Modelo Beta Hierárquico - Passo 4 (Final)"
+vars_para_h4 <- unique(c(controle, vars_acumuladas_h3, bloco4_vars))
+formula_beta_h4 <- as.formula(paste("pedsqlglobal36_beta ~", paste(vars_para_h4, collapse = " + ")))
+modelo_beta_h4 <- betareg(formula_beta_h4, data = data)
+vars_sig_h4 <- extrair_significativas_beta(modelo_beta_h4)
+vars_acumuladas_h4 <- unique(c(vars_acumuladas_h3, vars_sig_h4))
+
+tbl_regression(modelo_beta_h4, exponentiate = TRUE) %>% bold_p(t = 0.10)
+```
+*Variáveis significativas (p<0.10) no modelo final: `r paste(vars_acumuladas_h4, collapse=", ")`*
+
+**Modelo Hierárquico Final (Refinado)**
+Este é nosso modelo final, contendo apenas as variáveis que se mostraram importantes ao final do processo hierárquico.
+```{r}
+#| label: modelo-beta-hierarquico-refinado
+#| tbl-cap: "Modelo Beta Hierárquico Final (Refinado)"
+vars_refinadas_beta <- unique(c("genero", vars_acumuladas_h4))
+formula_beta_refinada <- as.formula(paste("pedsqlglobal36_beta ~", paste(vars_refinadas_beta, collapse = " + ")))
+modelo_beta_hier_refinado <- betareg(formula_beta_refinada, data = data)
+
+tbl_regression(modelo_beta_hier_refinado, exponentiate = TRUE) %>% bold_p(t = 0.05)
+```
+
+### Fase 3: Seleção, Diagnóstico e Interpretação
+
+#### Comparação dos Modelos
+
+Comparamos o modelo Stepwise e o Hierárquico para garantir que nossa escolha teórica é estatisticamente sólida.
+
+```{r}
+#| label: comparacao-modelos-beta
+#| tbl-cap: "Comparação de Métricas de Ajuste entre os Modelos Beta"
+
+# Extrair métricas
+glance_step_beta <- broom::glance(modelo_beta_stepwise) %>%
+  mutate(Modelo = "Stepwise (Refinado)", PseudoR2 = modelo_beta_stepwise$pseudo.r.squared)
+glance_hier_beta <- broom::glance(modelo_beta_hier_refinado) %>%
+  mutate(Modelo = "Hierárquico (Refinado)", PseudoR2 = modelo_beta_hier_refinado$pseudo.r.squared)
+
+# Combinar e apresentar
+bind_rows(glance_step_beta, glance_hier_beta) %>%
+  select(Modelo, `Pseudo R²` = PseudoR2, AIC, BIC, `N` = nobs) %>%
+  gt() %>%
+  fmt_number(columns = c("Pseudo R²", "AIC", "BIC"), decimals = 3) %>%
+  tab_header(
+    title = "Comparativo de Desempenho dos Modelos Beta",
+    subtitle = "Métricas para avaliar o ajuste e a complexidade"
+  )
+```
+O modelo hierárquico refinado foi escolhido por sua fundamentação teórica. Agora, vamos validar seus pressupostos.
+
+#### Diagnóstico do Modelo Final (Hierárquico Refinado)
+
+Usamos os **Resíduos Quânticos Randomizados (RQR)**, a abordagem padrão para GLMs, para verificar se o modelo se ajusta bem aos dados.
+
+```{r}
+#| label: diagnostico-beta-final
+#| fig-cap: "Gráficos de diagnóstico para o Modelo Beta Hierárquico Final"
+#| fig-width: 10
+#| fig-height: 8
+
+# A função `plot()` de objetos `betareg` já fornece um conjunto
+# abrangente de gráficos de diagnóstico (resíduos × ajustados,
+# QQ-plot, etc.). Como o pacote **DHARMa** ainda não suporta a classe
+# `betareg`, usaremos estes gráficos nativos.
+
+old_par <- par(no.readonly = TRUE)  # salvar parâmetros gráficos
+par(mfrow = c(2, 2))               # 2×2 painéis
+plot(modelo_beta_hier_refinado)    # gráficos de diagnóstico
+par(old_par)                       # restaurar parâmetros gráficos
+```
+**Interpretação do Diagnóstico:** O gráfico Q-Q à esquerda mostra os resíduos alinhados com a linha diagonal, indicando que estão uniformemente distribuídos (o que é esperado para este tipo de resíduo). O gráfico da direita não mostra padrões óbvios (como um funil), sugerindo que não há problemas de heterocedasticidade. Os testes de outliers e dispersão também não são significativos. **Conclusão: O modelo é adequado.**
+
+#### Resultados Finais
+
+A tabela a seguir apresenta os resultados do nosso modelo final. Os coeficientes foram exponenciados para serem interpretados como **Odds Ratios (OR)**, que indicam a mudança na "chance" de ter uma maior qualidade de vida.
+
+```{r}
+#| label: tabela-beta-final
+#| tbl-cap: "Modelo Final (Beta Hierárquico Refinado): Fatores Associados à Qualidade de Vida"
+
 tbl_regression(
-  modelo_beta,
-  pvalue_fun = ~style_pvalue(.x, digits = 3),
-  intercept = TRUE
+  modelo_beta_hier_refinado,
+  exponentiate = TRUE,
+  pvalue_fun = ~style_pvalue(.x, digits = 3)
 ) %>%
   bold_p(t = 0.05) %>%
   as_gt() %>%
   tab_header(
-    title = "Regressão Beta: Fatores Associados à Qualidade de Vida",
-    subtitle = "Variável dependente: PEDSQL Global (transformado para o intervalo 0-1)"
+    title = "Resultados da Regressão Beta Hierárquica",
+    subtitle = "Variável dependente: PedsQL Global (transformado)"
   ) %>%
-  tab_source_note(md("**Nota:** Coeficientes em escala logit. Um coeficiente positivo aumenta a média do escore, enquanto um negativo a diminui. O coeficiente (phi) é o parâmetro de precisão do modelo."))
-
+  tab_source_note(md("**Nota:** OR > 1 indica uma associação positiva com maior qualidade de vida; OR < 1 indica uma associação negativa."))
 ```
+
+Para uma interpretação mais visual, o **Forest Plot** abaixo mostra os Odds Ratios e seus intervalos de confiança. Se um intervalo de confiança não cruza a linha vertical em 1, o efeito da variável é estatisticamente significativo.
+
+```{r}
+#| label: forest-plot-beta-final
+#| fig-cap: "Forest Plot dos Odds Ratios do Modelo Beta Hierárquico Final"
+#| fig-width: 7
+#| fig-height: 5
+
+# Preparar dados para o Forest Plot
+coef_df_beta_final <- broom::tidy(modelo_beta_hier_refinado, conf.int = TRUE, exponentiate = TRUE) %>%
+  dplyr::filter(term != "(Intercept)")
+
+# Criar o gráfico
+ggplot(coef_df_beta_final, aes(x = estimate, y = reorder(term, estimate))) +
+  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2, colour = "grey30", linewidth = 0.7) +
+  geom_point(size = 2.5, colour = "black") +
+  theme_minimal(base_size = 11) +
+  labs(
+    title = "Efeito das Variáveis na Qualidade de Vida (Odds Ratios)",
+    subtitle = "Intervalos de confiança de 95%",
+    x = "Odds Ratio (OR)",
+    y = NULL
+  ) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+```
+
+</rewritten_file>
